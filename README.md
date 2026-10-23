@@ -1,16 +1,39 @@
-# React + Vite
+# MathFoundry
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A React presentation prototype for a teacher-focused custom math worksheet application.
 
-Currently, two official plugins are available:
+## Run locally
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+```bash
+npm install
+npm run dev
+```
 
-## React Compiler
+Open http://localhost:5173. Build with `npm run build`.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Presentation walkthrough
 
-## Expanding the ESLint configuration
+1. Start on **Overview**, then select **Create worksheet**.
+2. Choose addition. Set operand A to random integers between 10 and 99, and operand B to a manual value of 20. The solution is `A + B`.
+3. Select **Generate worksheet**. Try changing the problem count to 20 and generating again.
+4. Hover over a random operand and click its refresh arrow. Only that number changes. Click a number to edit it manually.
+5. Turn on **Answer key**. Print or select **Save as PDF** in the browser print dialog. Turn the answer key off before printing a student copy.
+6. Select **Save work**, optionally add it to the demo catalog, and save either a worksheet or problem design.
+7. Open **My library**, reopen your work, then explore and search the catalog by keywords or grade.
+8. Click the avatar to create a local demo profile.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+The quick demo guide is also available in the app sidebar.
+
+## Supported behavior
+
+- Random or fixed operands, numeric ranges and multiples constraints.
+- Addition, subtraction, multiplication, division and powers.
+- Safe solution expressions with A, B, numbers, parentheses and arithmetic precedence; no executable JavaScript.
+- Horizontal, stacked, long-division and radical display treatments. Decorations are visual; the separately entered expression controls the answer.
+- 6–30 problems, adaptive font sizes, individual operand edits and rerolls, answer keys and print layout.
+- Saved worksheets and reusable problem designs in localStorage.
+- Searchable seeded catalog, grade filters, alphabetical or sample popularity sorting, and local public submissions with a basic language filter.
+
+## Prototype boundaries
+
+This is a frontend demo. Profiles do not authenticate users. Saved work and public submissions exist only in this browser and are lost if site storage is cleared. Popularity values are sample data. Production accounts, shared cloud persistence, comprehensive moderation and external PDF indexing are future work. PDF export uses the browser print dialog. The interface uses optional Google Fonts with system fallbacks.
