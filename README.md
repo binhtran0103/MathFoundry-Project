@@ -1,28 +1,30 @@
 # MathFoundry
 
-A React presentation prototype for a teacher-focused custom math worksheet application.
+A worksheet builder for teachers, with a shared catalog and personal libraries.
 
 ## Run locally
+
+Use Node.js 22.13 or later on the Node.js 22 line, or a newer Node.js release supported by Vite.
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open http://localhost:5173. Build with `npm run build`.
+Open http://localhost:5173. Vite runs the React app and SQLite API together. To check the built app locally, run `npm run build` followed by `npm run preview`.
 
-## Presentation walkthrough
+## Worksheet walkthrough
 
 1. Start on **Overview**, then select **Create worksheet**.
 2. Choose addition. Set operand A to random integers between 10 and 99, and operand B to a manual value of 20. The solution is `A + B`.
 3. Select **Generate worksheet**. Try changing the problem count to 20 and generating again.
 4. Hover over a random operand and click its refresh arrow. Only that number changes. Click a number to edit it manually.
 5. Turn on **Answer key**. Print or select **Save as PDF** in the browser print dialog. Turn the answer key off before printing a student copy.
-6. Select **Save work**, optionally add it to the demo catalog, and save either a worksheet or problem design.
+6. Select **Save work** and save either a worksheet or a problem design. Sign in to publish to the shared catalog.
 7. Open **My library**, reopen your work, then explore and search the catalog by keywords or grade.
-8. Click the avatar to create a local demo profile.
+8. Open the account menu to create an account or sign in. If you have existing browser saves, open **My library** and select **Import browser work** to copy them into your private account library. The browser copies remain available when signed out.
 
-The quick demo guide is also available in the app sidebar.
+The quick guide is also available in the app sidebar.
 
 ## Supported behavior
 
@@ -31,9 +33,13 @@ The quick demo guide is also available in the app sidebar.
 - Safe solution expressions with A, B, numbers, parentheses and arithmetic precedence; no executable JavaScript.
 - Horizontal, stacked, long-division and radical display treatments. Decorations are visual; the separately entered expression controls the answer.
 - 6–30 problems, adaptive font sizes, individual operand edits and rerolls, answer keys and print layout.
-- Saved worksheets and reusable problem designs in localStorage.
-- Searchable seeded catalog, grade filters, alphabetical or sample popularity sorting, and local public submissions with a basic language filter.
+- SQLite-backed accounts, sessions, worksheets, and reusable problem designs. Guests can save work in their browser.
+- Searchable shared catalog with seeded examples, grade filters, alphabetical or sample popularity sorting, and a basic language filter for new public submissions.
 
-## Prototype boundaries
+## SQLite storage
 
-This is a frontend demo. Profiles do not authenticate users. Saved work and public submissions exist only in this browser and are lost if site storage is cleared. Popularity values are sample data. Production accounts, shared cloud persistence, comprehensive moderation and external PDF indexing are future work. PDF export uses the browser print dialog. The interface uses optional Google Fonts with system fallbacks.
+The API creates `.mathfoundry/mathfoundry.sqlite` and initializes the schema on first start. Set `MATHFOUNDRY_DB` to choose another database path outside the public and build directories. Docker Compose stores the database in the `mathfoundry-data` named volume.
+
+Accounts use an email address and password. SQLite stores salted password hashes and hashed session tokens. If running behind HTTPS, set `MATHFOUNDRY_ORIGIN` to the external origin (for example, `https://mathfoundry.example`) so the API validates that origin and issues Secure session cookies.
+
+Work saved to an account is private by default. Publishing adds a copy of the saved work to the shared catalog. Removing a published item from your library leaves its catalog entry available. Browser-only catalog submissions from earlier versions remain visible in their original browser.

@@ -9,3 +9,7 @@ services:
     volumes:
       - .:/app
       - /app/node_modules
+      - mathfoundry-data:/app/.mathfoundry
+
+volumes:
+  mathfoundry-data:
