@@ -16,7 +16,7 @@ Open http://localhost:5173. Vite runs the React app and SQLite API together. To 
 ## Worksheet walkthrough
 
 1. Start on **Overview**, then select **Create worksheet**.
-2. Choose addition. Set operand A to random integers between 10 and 99, and operand B to a manual value of 20. The solution is `A + B`.
+2. Start with `A + B`. Select each operand to set its own range or fixed value. Select **Add operand** to append another, then click an operator to fill the gap or drag it into place. The canvas scrolls horizontally as it grows.
 3. Select **Generate worksheet**. Try changing the problem count to 20 and generating again.
 4. Hover over a random operand and click its refresh arrow. Only that number changes. Click a number to edit it manually.
 5. Turn on **Answer key**. Print or select **Save as PDF** in the browser print dialog. Turn the answer key off before printing a student copy.
@@ -30,7 +30,7 @@ The quick guide is also available in the app sidebar.
 
 - Random or fixed operands, numeric ranges and multiples constraints.
 - Addition, subtraction, multiplication, division and powers.
-- Safe solution expressions with A, B, numbers, parentheses and arithmetic precedence; no executable JavaScript.
+- Safe solution expressions with operand labels such as A, Z, and AA, numbers, parentheses, and arithmetic precedence. There is no fixed operand count in the editor.
 - Horizontal, stacked, long-division and radical display treatments. Decorations are visual; the separately entered expression controls the answer.
 - 6–30 problems, adaptive font sizes, individual operand edits and rerolls, answer keys and print layout.
 - SQLite-backed accounts, sessions, worksheets, and reusable problem designs. Guests can save work in their browser.

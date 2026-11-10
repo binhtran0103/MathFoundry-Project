@@ -1,24 +1,58 @@
 import Icon from './components/Icon.jsx'
 import Cards from './components/Cards.jsx'
 import AccountForm from './components/AccountForm.jsx'
-import { symbols, solveExpression, operandSettings } from '../models/worksheet.js'
+import { symbols, operandSettings } from '../models/worksheet.js'
 import { examples } from '../models/catalog.js'
 import './styles/App.css'
 
 export default function MathFoundryView({ controller }) {
-  const { page, design, setDesign, title, setTitle, count, setCount, problems, selectedObject, dragPreview, canvasRef, canvasItems, setExpressionEdited, answers, setAnswers, saved, profile, modal, setModal, notice, search, setSearch, grade, setGrade, sort, setSort, tab, setTab, error, setError, publish, setPublish, step, setStep, help, setHelp, navigate, useTemplate, updateOperandSettings, generateFromCanvas, changeOperand, beginCanvasDrag, beginPaletteDrag, updateSelectedObject, resizeAnswerObject, save, remove, catalog, authenticate, signOut, openAccount, importBrowserWork, importableCount, busy, removeCanvasItem } = controller
+  const { page, design, setDesign, title, setTitle, count, setCount, problems, answerKey, selectedObject, dragPreview, canvasRef, canvasItems, setExpression, addOperand, addOperator, selectCanvasItem, answers, setAnswers, saved, profile, modal, setModal, notice, search, setSearch, grade, setGrade, sort, setSort, tab, setTab, error, setError, publish, setPublish, step, setStep, help, setHelp, navigate, useTemplate, updateOperandSettings, generateFromCanvas, changeOperand, beginCanvasDrag, beginPaletteDrag, updateSelectedObject, resizeAnswerObject, save, remove, catalog, authenticate, signOut, openAccount, importBrowserWork, importableCount, busy, removeCanvasItem } = controller
   const navItems = [['Overview', 'grid'], ['Create worksheet', 'pen'], ['Explore catalog', 'book'], ['My library', 'folder']]
   function renderProblemEditor() {
-    return <div className="problem-builder"><div className="expression-card"><div><strong>Expression Order</strong><small>Type the exact calculation order; every operand on the canvas must be included.</small></div><input aria-label="Expression Order" value={design.rule} onChange={e => { setDesign(current => ({ ...current, rule: e.target.value })); setExpressionEdited(true) }} placeholder="A + C - B"/></div><div className="builder-section-label">PROBLEM CANVAS</div><p className="canvas-help">Drag objects into open space. Select one object to edit it. Right-click to remove it.</p><div ref={canvasRef} className="problem-canvas freeform-canvas">{canvasItems.map(item => <button key={item.id} className={`canvas-object ${item.type}-object ${selectedObject === item.id ? 'selected' : ''}`} style={{ left: `${item.x}%`, top: `${item.y}%`, ...(['answer','bar'].includes(item.type) ? { width: item.width, height: item.height } : {}) }} data-canvas-id={item.id} onPointerDown={e => beginCanvasDrag(e,item)} onContextMenu={e => { e.preventDefault(); removeCanvasItem(item.id) }}>{item.type === 'style' ? item.value[0].toUpperCase() + item.value.slice(1) : item.type === 'operator' ? symbols[item.value] : item.type === 'answer' ? 'Answer' : item.type === 'bar' ? null : <>{item.value}<small>Operand {item.value}</small></>}</button>)}</div><div className="builder-palette"><span>DRAG A PIECE TO ADD IT</span>{['A','B','C','D','E','F','G','H'].map(value => <button key={value} onPointerDown={e => beginPaletteDrag(e,`operand:${value}`,value)}>{value}<small>Operand</small></button>)}{Object.entries(symbols).map(([op,symbol]) => <button key={op} onPointerDown={e => beginPaletteDrag(e,`operator:${op}`,symbol)}>{symbol}<small>Operator</small></button>)}{[['horizontal','Horizontal'],['vertical','Stacked'],['division','Long division'],['radical','Radical']].map(([value,label]) => <button key={value} onPointerDown={e => beginPaletteDrag(e,`style:${value}`,label)}>{label}<small>Style</small></button>)}<button onPointerDown={e => beginPaletteDrag(e,'answer:new','Answer')}>Answer<small>Blank space</small></button><button onPointerDown={e => beginPaletteDrag(e,'bar:new','—')}>Horizontal bar<small>Divider</small></button></div>{dragPreview && <div className="canvas-drag-ghost" style={{ left: dragPreview.x, top: dragPreview.y }}>{dragPreview.label}</div>}</div>
+    return <div className="problem-builder">
+      <div className="expression-card">
+        <div><strong>Expression Order</strong><small>Use every operand label and an operator between operands.</small></div>
+        <input aria-label="Expression Order" value={design.rule} onChange={event => setExpression(event.target.value)} placeholder="A + B + C"/>
+      </div>
+      <div className="builder-section-label">PROBLEM CANVAS</div>
+      <p className="canvas-help">Add an operand, then choose an operator for the gap or drag it into place. Select an object to edit it.</p>
+      <div className="canvas-scroll" role="region" aria-label="Problem canvas" tabIndex={0}>
+        <div ref={canvasRef} className="problem-canvas freeform-canvas" style={{ width: design.canvasWidth }}>
+          {canvasItems.map(item => <button
+            key={item.id}
+            className={'canvas-object ' + item.type + '-object' + (selectedObject === item.id ? ' selected' : '')}
+            style={{ left: item.x + '%', top: item.y + '%', width: item.width, height: item.height }}
+            aria-label={item.type === 'operand' ? 'Operand ' + item.value : item.type === 'operator' ? 'Operator ' + item.label : item.label}
+            aria-pressed={selectedObject === item.id}
+            data-canvas-id={item.id}
+            onPointerDown={event => beginCanvasDrag(event, item)}
+            onClick={event => { if (event.detail === 0) selectCanvasItem(item.id) }}
+            onContextMenu={event => { event.preventDefault(); removeCanvasItem(item.id) }}
+          >
+            {item.type === 'bar' ? null : item.label}
+            {item.type === 'operand' && <small>Operand</small>}
+          </button>)}
+        </div>
+      </div>
+      <div className="builder-palette">
+        <button className="add-operand" onClick={addOperand}><Icon name="plus" size={16}/>Add operand</button>
+        {Object.entries(symbols).map(([operator, symbol]) => <button
+          key={operator}
+          aria-label={'Place operator ' + symbol}
+          onClick={() => addOperator(operator)}
+          onPointerDown={event => beginPaletteDrag(event, 'operator:' + operator)}
+        >{symbol}<small>Operator</small></button>)}
+        {Object.entries({ horizontal: 'Horizontal', vertical: 'Stacked', division: 'Long division', radical: 'Radical' })
+          .map(([style, label]) => <button key={style} onPointerDown={event => beginPaletteDrag(event, 'style:' + style)}>{label}<small>Style</small></button>)}
+        <button onPointerDown={event => beginPaletteDrag(event, 'answer:Answer')}>Answer<small>Blank space</small></button>
+        <button onPointerDown={event => beginPaletteDrag(event, 'bar:—')}>Horizontal bar<small>Divider</small></button>
+      </div>
+      {dragPreview && <div className="canvas-drag-ghost" style={{ left: dragPreview.x, top: dragPreview.y }}>{dragPreview.label}</div>}
+    </div>
   }
   function renderWorksheetProblem(problem, index) {
-    const fallback = [
-      { id: 'operand-a', type: 'operand', value: 'A', x: 20, y: 50 },
-      { id: 'operator', type: 'operator', value: design.operator, x: 50, y: 50 },
-      { id: 'operand-b', type: 'operand', value: 'B', x: 80, y: 50 },
-    ]
-    const layout = problem.layout || { items: fallback, canvasWidth: 700, canvasHeight: 420 }
-    const items = Array.isArray(layout) ? layout : layout.items || fallback
+    const layout = problem.layout
+    const items = Array.isArray(layout) ? layout : layout.items || canvasItems
     const sourceWidth = Array.isArray(layout) ? 700 : layout.canvasWidth || 700
     const sourceHeight = Array.isArray(layout) ? 420 : layout.canvasHeight || 420
     const objects = items.filter(item => item.type === 'operand' || item.type === 'operator' || item.type === 'answer' || item.type === 'bar').map(item => ({
@@ -28,32 +62,33 @@ export default function MathFoundryView({ controller }) {
       centerX: item.x * sourceWidth / 100,
       centerY: item.y * sourceHeight / 100,
     }))
-    const minX = Math.min(...objects.map(item => item.centerX - item.sourceWidth / 2))
-    const maxX = Math.max(...objects.map(item => item.centerX + item.sourceWidth / 2))
-    const minY = Math.min(...objects.map(item => item.centerY - item.sourceHeight / 2))
-    const maxY = Math.max(...objects.map(item => item.centerY + item.sourceHeight / 2))
+    const { minX, maxX, minY, maxY } = objects.reduce((bounds, item) => ({
+      minX: Math.min(bounds.minX, item.centerX - item.sourceWidth / 2),
+      maxX: Math.max(bounds.maxX, item.centerX + item.sourceWidth / 2),
+      minY: Math.min(bounds.minY, item.centerY - item.sourceHeight / 2),
+      maxY: Math.max(bounds.maxY, item.centerY + item.sourceHeight / 2),
+    }), { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity })
     const sceneWidth = Math.max(1, maxX - minX)
     const sceneHeight = Math.max(1, maxY - minY)
-    const values = problem.values || { A: problem.a, B: problem.b }
+    const { values } = problem
     return <div className={`problem ${design.style}`} key={index}><span className="problem-number">{String(index+1).padStart(2,'0')}</span><div className="snapshot-viewport"><div className="problem-layout-snapshot" style={{ '--scene-ratio': `${sceneWidth} / ${sceneHeight}` }}>{objects.map(item => {
       const position = { left: `${(item.centerX - minX) / sceneWidth * 100}%`, top: `${(item.centerY - minY) / sceneHeight * 100}%`, width: `${item.sourceWidth / sceneWidth * 100}%`, height: `${item.sourceHeight / sceneHeight * 100}%`, '--token-font-size': `${18 / sceneWidth * 100}cqw` }
       return item.type === 'operand'
-        ? <div key={item.id} className="snapshot-token snapshot-operand" style={{ ...position, '--width-font': `${150 / Math.max(1, String(values[item.value] ?? '').length)}cqw` }}><input aria-label={`Problem ${index+1} operand ${item.value}`} type="number" value={values[item.value] ?? ''} onChange={e => changeOperand(index,item.value,e.target.value)}/>{operandSettings(design,item.value).mode === 'random' && <button title={`Reroll operand ${item.value}`} onClick={() => changeOperand(index,item.value)}><Icon name="refresh" size={11}/></button>}</div>
+        ? <div key={item.id} className="snapshot-token snapshot-operand" style={{ ...position, '--width-font': `${150 / Math.max(1, String(values[item.value] ?? '').length)}cqw` }}><input aria-label={`Problem ${index+1} operand ${item.value}`} type="number" value={values[item.value] ?? ''} onChange={e => changeOperand(index,item.value,e.target.value)}/>{operandSettings(design,item.value)?.mode === 'random' && <button title={`Reroll operand ${item.value}`} onClick={() => changeOperand(index,item.value)}><Icon name="refresh" size={11}/></button>}</div>
         : item.type === 'operator'
           ? <span key={item.id} className="snapshot-token snapshot-operator" style={position}><span className="snapshot-operator-glyph">{symbols[item.value] || item.value}</span></span>
           : item.type === 'answer'
-            ? <div key={item.id} className="snapshot-token snapshot-answer-space" style={position}>{answers ? problem.answer ?? solveExpression(problem.expression || design.rule, values) : ''}</div>
+            ? <div key={item.id} className="snapshot-token snapshot-answer-space" style={position}>{answerKey?.answerAt(index) ?? ''}</div>
             : <div key={item.id} className="snapshot-token snapshot-bar" style={position}/>
     })}</div></div></div>
   }
-  function renderOperandSettings(name) {
-    const config = operandSettings(design, name)
-    return <div className="operand-settings active-operand"><div className="operand-header"><strong><span>{name}</span> Operand {name}</strong><select aria-label={`Operand ${name} generation mode`} value={config.mode} onChange={e => updateOperandSettings(name,{ mode:e.target.value })}><option value="random">Random</option><option value="fixed">Manual</option></select></div>{config.mode === 'fixed' ? <label>Value<input type="number" value={config.value} onChange={e => updateOperandSettings(name,{ value:e.target.value })}/></label> : <><div className="input-row"><label>Minimum<input type="number" value={config.min} onChange={e => updateOperandSettings(name,{ min:e.target.value })}/></label><label>Maximum<input type="number" value={config.max} onChange={e => updateOperandSettings(name,{ max:e.target.value })}/></label></div><label>Number constraint<select value={config.multiple} onChange={e => updateOperandSettings(name,{ multiple:Number(e.target.value) })}><option value={1}>Any integer</option><option value={10}>Multiples of 10</option><option value={100}>Multiples of 100</option><option value={5}>Multiples of 5</option><option value={12}>Multiples of 12</option></select></label></>}</div>
+  function renderOperandSettings({ id, value: name, constraint: config }) {
+    return <div className="operand-settings active-operand"><div className="operand-header"><strong><span>{name}</span> Operand {name}</strong><select aria-label={`Operand ${name} generation mode`} value={config.mode} onChange={e => updateOperandSettings(id,{ mode:e.target.value })}><option value="random">Random</option><option value="fixed">Manual</option></select></div>{config.mode === 'fixed' ? <label>Value<input type="number" value={config.value} onChange={e => updateOperandSettings(id,{ value:e.target.value })}/></label> : <><div className="input-row"><label>Minimum<input type="number" value={config.min} onChange={e => updateOperandSettings(id,{ min:e.target.value })}/></label><label>Maximum<input type="number" value={config.max} onChange={e => updateOperandSettings(id,{ max:e.target.value })}/></label></div><label>Number constraint<select value={config.multiple} onChange={e => updateOperandSettings(id,{ multiple:Number(e.target.value) })}><option value={1}>Any integer</option><option value={10}>Multiples of 10</option><option value={100}>Multiples of 100</option><option value={5}>Multiples of 5</option><option value={12}>Multiples of 12</option></select></label></>}</div>
   }
   function renderSelectedObjectSettings() {
     const item = canvasItems.find(object => object.id === selectedObject)
     if (!item) return <p className="selection-hint">Select one canvas object to edit its settings.</p>
-    if (item.type === 'operand') return renderOperandSettings(item.value)
+    if (item.type === 'operand') return renderOperandSettings(item)
     if (item.type === 'operator') return <label>Operator<select value={item.value} onChange={e => updateSelectedObject(e.target.value)}>{Object.entries(symbols).map(([operator,symbol]) => <option key={operator} value={operator}>{symbol}</option>)}</select></label>
     if (item.type === 'answer') return <><p className="selection-hint">This box becomes blank writing space on the worksheet.</p><div className="input-row"><label>Width<input aria-label="Answer space width" type="number" min="40" max="600" value={item.width} onChange={e => resizeAnswerObject('width',e.target.value)}/></label><label>Height<input aria-label="Answer space height" type="number" min="40" max="400" value={item.height} onChange={e => resizeAnswerObject('height',e.target.value)}/></label></div></>
     if (item.type === 'bar') return <><p className="selection-hint">A visual divider only; it does not affect the expression.</p><label>Bar width<input aria-label="Divider width" type="number" min="40" max="600" value={item.width} onChange={e => resizeAnswerObject('width',e.target.value)}/></label></>
@@ -82,8 +117,8 @@ export default function MathFoundryView({ controller }) {
       {step === 'design' ? <>
       
 
-      <div className="selected-object-card"><div className="builder-section-label">SELECTED OBJECT</div>{renderSelectedObjectSettings()}</div>
-      </> : <><label>Operand font<select value={design.operandFont || 'mono'} onChange={e => setDesign({...design,operandFont:e.target.value})}><option value="mono">Terminal Mono</option><option value="courier">Courier</option><option value="console">Lucida Console</option><option value="serif">Book Serif</option><option value="sans">Clean Sans</option></select></label><div className="input-row"><label>Problems<select value={count} onChange={e => setCount(Number(e.target.value))}>{[6,8,12,16,20,24,30].map(n => <option key={n} value={n}>{n} problems</option>)}</select></label><label>Grade level<select value={design.grade} onChange={e => setDesign({...design,grade:e.target.value})}>{[1,2,3,4,5,6,7,8].map(n => <option key={n}>Grade {n}</option>)}</select></label></div><label>Keywords<input value={design.tags} onChange={e => setDesign({...design,tags:e.target.value})}/></label><button className="secondary full" onClick={generateFromCanvas}><Icon name="refresh" size={17}/>Generate fresh problems</button><div className="toggle-row"><div><strong>Answer key</strong><small>Include solutions on the sheet</small></div><button role="switch" aria-checked={answers} aria-label="Show answer key" className={`toggle ${answers ? 'on' : ''}`} onClick={() => setAnswers(!answers)}><span/></button></div><div className="instruction"><span>✦</span><p>Click a number to edit it. Use its refresh arrow to reroll just that operand.</p></div><button className="primary full" onClick={() => window.print()}><Icon name="print" size={17}/>Print / Save as PDF</button><button className="text-button full" onClick={() => setStep('design')}>Edit problem design <Icon name="arrow" size={16}/></button></>}
+      <div className="selected-object-card"><div className="builder-section-label">SELECTED OBJECT</div>{renderSelectedObjectSettings()}{selectedObject && <button className="text-button" onClick={() => removeCanvasItem(selectedObject)}>Remove selected object</button>}</div>
+      </> : <><label>Operand font<select value={design.operandFont || 'mono'} onChange={e => setDesign({operandFont:e.target.value})}><option value="mono">Terminal Mono</option><option value="courier">Courier</option><option value="console">Lucida Console</option><option value="serif">Book Serif</option><option value="sans">Clean Sans</option></select></label><div className="input-row"><label>Problems<select value={count} onChange={e => setCount(Number(e.target.value))}>{[6,8,12,16,20,24,30].map(n => <option key={n} value={n}>{n} problems</option>)}</select></label><label>Grade level<select value={design.grade} onChange={e => setDesign({grade:e.target.value})}>{[1,2,3,4,5,6,7,8].map(n => <option key={n}>Grade {n}</option>)}</select></label></div><label>Keywords<input value={design.tags} onChange={e => setDesign({tags:e.target.value})}/></label><button className="secondary full" onClick={generateFromCanvas}><Icon name="refresh" size={17}/>Generate fresh problems</button><div className="toggle-row"><div><strong>Answer key</strong><small>Include solutions on the sheet</small></div><button role="switch" aria-checked={answers} aria-label="Show answer key" className={`toggle ${answers ? 'on' : ''}`} onClick={() => setAnswers(!answers)}><span/></button></div><div className="instruction"><span>✦</span><p>Click a number to edit it. Use its refresh arrow to reroll just that operand.</p></div><button className="primary full" onClick={() => window.print()}><Icon name="print" size={17}/>Print / Save as PDF</button><button className="text-button full" onClick={() => setStep('design')}>Edit problem design <Icon name="arrow" size={16}/></button></>}
       </section><section className={`preview-panel ${step === 'design' ? 'editor-stage' : 'worksheet-stage'}`}>{step === 'design' ? <><div className="preview-toolbar"><span><i/>PROBLEM EDITOR</span><span>Drag to arrange · overlaps are blocked</span></div>{renderProblemEditor()}</> : <><div className="preview-toolbar"><span><i/>LIVE PREVIEW</span><span>{problems.length} problems · Letter 8.5 × 11 in</span></div><div className={`worksheet operand-font-${design.operandFont || 'mono'}`} style={{'--problem-font': `${worksheetFontSize}px`, '--problem-rows': worksheetRows, '--problem-columns': worksheetColumns}}><div className="worksheet-brand">MATHFOUNDRY <span>{design.grade} · PRACTICE SERIES</span></div><h2>{title || 'Untitled worksheet'}</h2><p className="worksheet-instruction">{answers ? 'Answer key • Solutions shown below' : 'Take your time. Show your thinking. You’ve got this.'}</p><div className="student-line">Name <span/> Date <span/></div><div className={`worksheet-problems ${worksheetColumns > 2 ? 'three-columns' : ''}`}>{problems.map(renderWorksheetProblem)}</div><div className="worksheet-footer"><span>Small steps. Big discoveries.</span><span>MathFoundry · 1</span></div></div><div className="preview-caption"><Icon name="check" size={15}/>Worksheet problems are generated from your reusable problem design.</div></>}</section></div>
     </>}
     {page === 'Explore catalog' && <><div className="page-heading"><div><div className="eyebrow">GOOD IDEAS ARE BETTER SHARED</div><h1>A little inspiration for every lesson<span>.</span></h1><p>Explore ready-to-use practice, then add your own teaching touch.</p></div></div><div className="catalog-controls"><div className="search-box"><Icon name="search"/><input placeholder="Search skills, topics, or keywords…" aria-label="Search catalog" value={search} onChange={e => setSearch(e.target.value)}/></div><select aria-label="Filter by grade" value={grade} onChange={e => setGrade(e.target.value)}><option>All grades</option>{[1,2,3,4,5,6,7,8].map(n => <option key={n}>Grade {n}</option>)}</select><select aria-label="Sort catalog" value={sort} onChange={e => setSort(e.target.value)}><option value="popular">Most popular</option><option value="name">Name: A–Z</option></select></div><div className="catalog-tabs">{['Worksheets','Problem designs'].map(name => <button key={name} className={tab === name ? 'selected' : ''} onClick={() => setTab(name)}>{name}</button>)}<span>{catalog.length} results</span></div><p className="demo-disclosure">Popularity counts for sample worksheets are illustrative.</p>{catalog.length ? <Cards onOpen={useTemplate} onRemove={remove} items={catalog}/> : <div className="empty-state"><Icon name="search" size={34}/><h2>No matches just yet</h2><p>Try another keyword or grade level.</p><button className="secondary" onClick={() => { setSearch(''); setGrade('All grades') }}>Clear filters</button></div>}</>}

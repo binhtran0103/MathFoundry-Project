@@ -1,37 +1,35 @@
 import { useEffect, useRef, useState } from 'react'
-import { initialDesign, symbols, drawOperand, generate, solveExpression, operandSettings } from '../models/worksheet.js'
+import { ProblemTemplate, Worksheet } from '../models/worksheet.js'
+import { Operand, Operator, StyleItem } from '../models/problemElements.js'
+import { User } from '../models/user.js'
 import { examples } from '../models/catalog.js'
 import { read, write } from '../models/storage.js'
 import { workspaceRequest } from '../models/workspaceApi.js'
 
-const initialCanvasItems = [
-  { id: 'operand-a', type: 'operand', value: 'A', x: 20, y: 50 },
-  { id: 'operator', type: 'operator', value: '+', x: 50, y: 50 },
-  { id: 'operand-b', type: 'operand', value: 'B', x: 80, y: 50 },
-]
-
 export default function useWorksheetController() {
   const [page, setPage] = useState('Overview')
-  const [design, setDesign] = useState(structuredClone(initialDesign))
-  const [title, setTitle] = useState('Two-digit addition')
+  const [worksheet, setWorksheet] = useState(() => Worksheet.generate(new ProblemTemplate(), 12))
+  const [design, setTemplate] = useState(worksheet.template)
+  const [title, setTitle] = useState(worksheet.template.name)
   const [count, setCount] = useState(12)
-  const [problems, setProblems] = useState(() => generate(initialDesign, 12))
   const [selectedObject, setSelectedObject] = useState('operand-a')
   const [dragPreview, setDragPreview] = useState(null)
   const dragRef = useRef(null)
   const canvasRef = useRef(null)
-  const [canvasItems, setCanvasItems] = useState(initialCanvasItems)
-  const [expressionEdited, setExpressionEdited] = useState(false)
-  const [answers, setAnswers] = useState(false)
+  const revealElement = useRef(null)
+  const canvasItems = design.canvasItems
+  const problems = worksheet.problems
+  const [answers, setShowAnswers] = useState(false)
   const [guestItems, setGuestItems] = useState(() => read('mf-saved', []))
   const [legacyPublicItems] = useState(() => read('mf-public', []))
   const [workspace, setWorkspace] = useState({ profile: null, saved: [], published: [] })
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const pending = useRef(false)
-  const { profile, published } = workspace
-  const saved = profile ? workspace.saved : guestItems
-  const importable = profile ? guestItems.filter(item => !workspace.saved.some(entry => entry.id === item.id)) : []
+  const { published } = workspace
+  const profile = workspace.profile ? new User(workspace.profile, workspace.saved) : null
+  const saved = profile?.library ?? guestItems
+  const importable = profile?.browserWorkToImport(guestItems) ?? []
   const [modal, setModal] = useState(null)
   const [notice, setNotice] = useState('')
   const [search, setSearch] = useState('')
@@ -40,7 +38,7 @@ export default function useWorksheetController() {
   const [tab, setTab] = useState('Worksheets')
   const [error, setError] = useState('')
   const [publish, setPublish] = useState(false)
-  const [step, setStep] = useState('design')
+  const [step, setActiveStep] = useState('design')
   const [help, setHelp] = useState(false)
   function toast(message) { setNotice(message); window.setTimeout(() => setNotice(''), 4500) }
   useEffect(() => {
@@ -85,129 +83,177 @@ export default function useWorksheetController() {
     setModal('profile')
   }
   function navigate(next) { setPage(next); setError(''); setSearch('') }
+  function openWorksheet(next, nextTitle) {
+    setWorksheet(next)
+    setTemplate(next.template)
+    setTitle(nextTitle)
+    setCount(next.problems.length)
+    setSelectedObject(next.template.canvasItems.find(item => item instanceof Operand)?.id || '')
+    setShowAnswers(false)
+  }
+
   function useTemplate(item) {
-    setExpressionEdited(false)
-    setSelectedObject('operand-a')
-    if (item.design) { setDesign(structuredClone(item.design)); setCanvasItems(item.design.canvasItems || [{ id: 'operand-a', type: 'operand', value: 'A', x: 20, y: 50 }, { id: 'operator', type: 'operator', value: item.design.operator || '+', x: 50, y: 50 }, { id: 'operand-b', type: 'operand', value: 'B', x: 80, y: 50 }]); setTitle(item.title || item.name); setCount(item.count); setProblems(item.problems || generate(item.design, item.count)) }
-    else {
-      const next = { ...structuredClone(initialDesign), name: item.name, grade: item.grade, tags: item.tags, operator: item.operator, rule: `A ${item.operator} B` }
-      if (item.operator === '*') { next.a.min = 2; next.a.max = 12; next.b.min = 2; next.b.max = 12 }
-      if (item.operator === '/') { next.a = { mode: 'random', min: 12, max: 120, multiple: 12, value: 24 }; next.b = { mode: 'fixed', min: 1, max: 12, multiple: 1, value: 12 } }
-      if (item.operator === '-') { next.a.min = 50; next.a.max = 99; next.b.min = 1; next.b.max = 49 }
-      if (item.operator === '^') { next.a = { ...next.a, mode: 'fixed', value: 10 }; next.b.min = 1; next.b.max = 4 }
-      setDesign(next); setCanvasItems([{ id: 'operand-a', type: 'operand', value: 'A', x: 20, y: 50 }, { id: 'operator', type: 'operator', value: item.operator, x: 50, y: 50 }, { id: 'operand-b', type: 'operand', value: 'B', x: 80, y: 50 }]); setTitle(item.name); setCount(item.count); setProblems(generate(next, item.count))
+    try {
+      const next = profile?.openSavedWork(item.id) || Worksheet.fromItem(item)
+      openWorksheet(next, item.title || item.name)
+      setActiveStep('worksheet')
+      navigate('Create worksheet')
+    } catch (error) {
+      setError(error.message)
+      toast(error.message)
     }
-    setStep('worksheet'); setAnswers(false); navigate('Create worksheet')
   }
-  function updateOperandSettings(name, patch) {
-    const key = name.toLowerCase()
-    setDesign(current => ['a','b'].includes(key)
-      ? { ...current, [key]: { ...current[key], ...patch } }
-      : { ...current, operands: { ...current.operands, [name]: { ...(current.operands?.[name] || structuredClone(current.a)), ...patch } } })
+
+  function setExpression(rule) {
+    setTemplate(current => current.with({ rule, expressionEdited: true }))
+    setError('')
   }
-  function problemExpression(items = canvasItems) {
-    return items.filter(item => item.type === 'operand' || item.type === 'operator')
-      .sort((a, b) => a.x - b.x)
-      .map(item => item.type === 'operand' ? item.value : item.value)
-      .join(' ')
+
+  function setDesign(patch) {
+    const next = design.with(patch)
+    setTemplate(next)
+    if (worksheet.template === design) setWorksheet(worksheet.withPresentation(next))
   }
+
+  function updateOperandSettings(id, patch) {
+    setTemplate(current => current.with({
+      canvasItems: current.canvasItems.map(item => item.id === id ? item.withSettings(patch) : item),
+    }))
+  }
+
+  function generateWorksheet() {
+    const bounds = canvasRef.current?.getBoundingClientRect()
+    const layout = design.layout(bounds?.width || design.canvasWidth || worksheet.layout.canvasWidth,
+      bounds?.height || worksheet.layout.canvasHeight)
+    return Worksheet.generate(design, count, layout)
+  }
+
   function generateFromCanvas() {
     try {
-      const expression = design.rule.trim() || problemExpression()
-      const operands = [...new Set(canvasItems.filter(item => item.type === 'operand').map(item => item.value))]
-      if (operands.length < 2) throw new Error('Add at least two operands to the problem canvas.')
-      const referenced = [...expression.matchAll(/[A-Z][A-Z0-9]*/gi)].map(match => match[0].toUpperCase())
-      const missing = operands.filter(name => !referenced.includes(name))
-      if (missing.length) throw new Error(`Expression order is missing operand${missing.length > 1 ? 's' : ''} ${missing.join(', ')}.`)
-      const canvasBounds = canvasRef.current?.getBoundingClientRect()
-      const layout = { items: structuredClone(canvasItems), canvasWidth: canvasBounds?.width || 700, canvasHeight: canvasBounds?.height || 420 }
-      const next = Array.from({ length: count }, () => {
-        const values = Object.fromEntries(operands.map(name => [name, drawOperand(operandSettings(design, name))]))
-        const answer = solveExpression(expression, values)
-        return { values, a: values.A, b: values.B, answer, expression, layout }
-      })
-      setDesign(current => ({ ...current, rule: expression }))
-      setProblems(next); setError(''); setStep('worksheet'); toast('Worksheet created from your problem layout.')
-    } catch (e) { setError(e.message) }
+      setWorksheet(generateWorksheet())
+      setError('')
+      setActiveStep('worksheet')
+      toast('Worksheet created from your problem layout.')
+    } catch (error) {
+      setError(error.message)
+    }
   }
+
+  function setStep(next) {
+    if (next === 'worksheet' && (worksheet.template !== design || problems.length !== count)) {
+      generateFromCanvas()
+      return
+    }
+    setActiveStep(next)
+  }
+
   function changeOperand(index, name, value) {
     try {
-      const config = operandSettings(design, name)
-      const next = problems.map((problem, i) => {
-        if (i !== index) return problem
-        const values = { ...(problem.values || { A: problem.a, B: problem.b }), [name]: value === undefined ? drawOperand(config, problem.values?.[name]) : Number(value) }
-        return { ...problem, values, answer: solveExpression(problem.expression || design.rule, values) }
-      })
-      next.forEach(problem => solveExpression(problem.expression || design.rule, problem.values || { A: problem.a, B: problem.b }))
-      setProblems(next); setError('')
-    } catch (e) { setError(e.message) }
+      setWorksheet(worksheet.changeOperand(index, name, value))
+      setError('')
+    } catch (error) {
+      setError(error.message)
+    }
   }
+
+  function setAnswers(show) {
+    try {
+      if (show && worksheet.answerKey.solutions.length === 0) throw new Error('Generate a worksheet to see its answers.')
+      setShowAnswers(show)
+      setError('')
+    } catch (error) {
+      setError(error.message)
+    }
+  }
+
+  function updateElements(items, patch) {
+    setTemplate(current => current.withElements(items).with(patch))
+    setError('')
+  }
+
+  function addOperand() {
+    const width = canvasRef.current?.getBoundingClientRect().width
+    if (!width) return
+    const next = design.appendOperand(width)
+    const { id } = next.canvasItems.at(-1)
+    revealElement.current = id
+    setTemplate(next)
+    setSelectedObject(id)
+    setError('')
+  }
+
+  useEffect(() => {
+    const id = revealElement.current
+    const canvas = canvasRef.current
+    if (!id || !canvas) return
+    revealElement.current = null
+    const item = [...canvas.querySelectorAll('[data-canvas-id]')].find(node => node.dataset.canvasId === id)
+    if (!item) return
+    const viewport = canvas.parentElement
+    const visible = viewport.getBoundingClientRect()
+    const element = item.getBoundingClientRect()
+    if (element.left < visible.left) viewport.scrollLeft += element.left - visible.left - 12
+    if (element.right > visible.right) viewport.scrollLeft += element.right - visible.right + 12
+  }, [design])
   function commitCanvasDrop(payload, clientX, clientY) {
     const canvas = canvasRef.current
-    if (!canvas) return null
+    if (!canvas) return
     const bounds = canvas.getBoundingClientRect()
-    const movingId = payload.startsWith('move:') ? payload.slice(5) : null
-    const [type, value] = movingId ? ['', ''] : payload.split(':')
-    const operandId = type === 'operand' ? `operand-${value.toLowerCase()}` : null
-    const operators = canvasItems.filter(item => item.type === 'operator')
-    const operandCount = canvasItems.filter(item => item.type === 'operand').length
-    const replacedId = movingId || canvasItems.find(item => item.id === operandId)?.id ||
-      (type === 'style' ? canvasItems.find(item => item.id === 'style')?.id : null) ||
-      (type === 'operator' && operators.length === 1 && operandCount <= 2 ? operators[0].id : null)
-    const existingNode = replacedId && [...canvas.querySelectorAll('[data-canvas-id]')].find(node => node.dataset.canvasId === replacedId)
-    const width = existingNode?.offsetWidth || (type === 'answer' ? 120 : type === 'bar' ? 160 : type === 'style' ? 108 : type === 'operator' ? 48 : 72)
-    const height = existingNode?.offsetHeight || (type === 'answer' ? 56 : type === 'bar' ? 4 : type === 'style' ? 32 : 48)
+    const [type, value] = payload.split(':')
+    const operators = canvasItems.filter(item => item instanceof Operator)
+    const operandCount = canvasItems.filter(item => item instanceof Operand).length
+    const replaced = canvasItems.find(item => item.id === value && type === 'move') ||
+      (type === 'style' && canvasItems.find(item => item.type === 'style')) ||
+      (type === 'operator' && operators.length === 1 && operandCount <= 2 && operators[0])
+    const nodes = [...canvas.querySelectorAll('[data-canvas-id]')]
+    const existing = replaced && nodes.find(node => node.dataset.canvasId === replaced.id)
+    const width = existing?.offsetWidth || ({ answer: 120, bar: 160, style: 108, operator: 48 })[type]
+    const height = existing?.offsetHeight || ({ answer: 56, bar: 4, style: 32, operator: 48 })[type]
     const px = Math.max(width / 2, Math.min(bounds.width - width / 2, clientX - bounds.left))
     const py = Math.max(height / 2, Math.min(bounds.height - height / 2, clientY - bounds.top))
-    const collision = [...canvas.querySelectorAll('[data-canvas-id]')].some(node => {
-      if (node.dataset.canvasId === replacedId) return false
+    const collision = nodes.some(node => {
+      if (node.dataset.canvasId === replaced?.id) return false
       const rect = node.getBoundingClientRect()
       const dx = Math.abs(px - (rect.left - bounds.left + rect.width / 2))
       const dy = Math.abs(py - (rect.top - bounds.top + rect.height / 2))
       return dx < (width + rect.width) / 2 - 1 && dy < (height + rect.height) / 2 - 1
     })
-    if (collision) { setError('That position overlaps another object. Move it to a clear space.'); return null }
-    const x = (px / bounds.width) * 100
-    const y = (py / bounds.height) * 100
-    let nextItems = [...canvasItems]
-    let selectedId = movingId
-    if (movingId) {
-      nextItems = nextItems.map(item => item.id === movingId ? { ...item, x, y } : item)
-    } else if (type === 'operand') {
-      selectedId = operandId
-      if (!['A','B'].includes(value)) setDesign(current => ({ ...current, operands: { ...current.operands, [value]: current.operands?.[value] || structuredClone(current.a) } }))
-      nextItems = nextItems.some(item => item.id === operandId)
-        ? nextItems.map(item => item.id === operandId ? { ...item, x, y } : item)
-        : [...nextItems, { id: operandId, type, value, x, y }]
-    } else if (type === 'operator') {
-      const currentOperators = nextItems.filter(item => item.type === 'operator')
-      const currentOperandCount = nextItems.filter(item => item.type === 'operand').length
-      if (currentOperators.length === 1 && currentOperandCount <= 2) {
-        selectedId = currentOperators[0].id
-        nextItems = nextItems.map(item => item.id === selectedId ? { ...item, value, x, y } : item)
-      } else {
-        selectedId = `operator-${crypto.randomUUID()}`
-        nextItems = [...nextItems, { id: selectedId, type, value, x, y }]
-      }
-      setDesign(current => ({ ...current, operator: value }))
-    } else if (type === 'style') {
-      selectedId = 'style'
-      setDesign(current => ({ ...current, style: value }))
-      nextItems = nextItems.some(item => item.id === 'style')
-        ? nextItems.map(item => item.id === 'style' ? { ...item, value, x, y } : item)
-        : [...nextItems, { id: 'style', type, value, x, y }]
-    } else if (type === 'answer') {
-      selectedId = `answer-${crypto.randomUUID()}`
-      nextItems = [...nextItems, { id: selectedId, type, value: 'Answer', x, y, width: 120, height: 56 }]
-    } else if (type === 'bar') {
-      selectedId = `bar-${crypto.randomUUID()}`
-      nextItems = [...nextItems, { id: selectedId, type, value: 'bar', x, y, width: 160, height: 4 }]
+    if (collision) {
+      setError('That position overlaps another object. Move it to a clear space.')
+      return
     }
-    setCanvasItems(nextItems)
-    setSelectedObject(selectedId)
-    if (!expressionEdited) setDesign(current => ({ ...current, rule: problemExpression(nextItems) }))
-    setError('')
-    return selectedId
+
+    const position = { x: px / bounds.width * 100, y: py / bounds.height * 100 }
+    const id = replaced?.id || crypto.randomUUID()
+    const geometry = { id, value, ...position }
+    let element
+    if (replaced) element = replaced.with(type === 'move' ? position : { ...position, value })
+    else if (type === 'operator') element = new Operator(geometry)
+    else if (type === 'style') element = new StyleItem(geometry)
+    else element = new StyleItem({ ...geometry, type, width, height })
+
+    const items = replaced ? canvasItems.map(item => item.id === id ? element : item) : [...canvasItems, element]
+    const patch = type === 'operator' ? { operator: value } : type === 'style' ? { style: value } : {}
+    updateElements(items, patch)
+    setSelectedObject(id)
+    return id
+  }
+
+  function addOperator(symbol) {
+    const bounds = canvasRef.current?.getBoundingClientRect()
+    if (!bounds) return
+    const arithmetic = canvasItems.filter(item => item instanceof Operand || item instanceof Operator)
+      .sort((left, right) => left.x - right.x)
+    const rightIndex = arithmetic.findIndex((item, index) => item instanceof Operand && arithmetic[index - 1] instanceof Operand)
+    if (rightIndex === -1) {
+      setError('Drag the operator to a clear position on the canvas.')
+      return
+    }
+    const left = arithmetic[rightIndex - 1]
+    const right = arithmetic[rightIndex]
+    revealElement.current = commitCanvasDrop('operator:' + symbol,
+      bounds.left + (left.x + right.x) * bounds.width / 200,
+      bounds.top + (left.y + right.y) * bounds.height / 200)
   }
   function beginCanvasDrag(event, item) {
     event.preventDefault()
@@ -223,10 +269,8 @@ export default function useWorksheetController() {
   function updateSelectedObject(value) {
     const item = canvasItems.find(object => object.id === selectedObject)
     if (!item) return
-    const nextItems = canvasItems.map(object => object.id === item.id ? { ...object, value } : object)
-    setCanvasItems(nextItems)
-    if (item.type === 'operator') setDesign(current => ({ ...current, operator: value, ...(!expressionEdited ? { rule: problemExpression(nextItems) } : {}) }))
-    if (item.type === 'style') setDesign(current => ({ ...current, style: value }))
+    const items = canvasItems.map(object => object.id === item.id ? object.with({ value }) : object)
+    updateElements(items, item instanceof Operator ? { operator: value } : { style: value })
   }
   function resizeAnswerObject(dimension, rawValue) {
     const selected = canvasItems.find(object => object.id === selectedObject && ['answer','bar'].includes(object.type))
@@ -245,7 +289,7 @@ export default function useWorksheetController() {
       return dx < (width + otherWidth) / 2 - 1 && dy < (height + otherHeight) / 2 - 1
     })
     if (collision) { setError('That answer box size overlaps another object. Make it smaller or move it.'); return }
-    setCanvasItems(items => items.map(item => item.id === selected.id ? { ...item, [dimension]: value } : item))
+    setTemplate(current => current.with({ canvasItems: current.canvasItems.map(item => item.id === selected.id ? item.with({ [dimension]: value }) : item) }))
     setError('')
   }
   useEffect(() => {
@@ -255,7 +299,7 @@ export default function useWorksheetController() {
       if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 3) drag.moved = true
       if (drag.moved) {
         const item = drag.id && canvasItems.find(object => object.id === drag.id)
-        const label = item ? item.type === 'operand' ? item.value : item.type === 'operator' ? symbols[item.value] : item.type === 'answer' ? 'Answer' : item.type === 'bar' ? '—' : item.value : drag.payload.split(':')[1]
+        const label = item?.label ?? drag.payload.split(':')[1]
         setDragPreview({ label, x: event.clientX, y: event.clientY })
       }
     }
@@ -266,7 +310,7 @@ export default function useWorksheetController() {
       if (!drag.moved) {
         if (drag.source === 'canvas') setSelectedObject(drag.id)
       } else {
-        const bounds = canvasRef.current?.getBoundingClientRect()
+        const bounds = canvasRef.current?.parentElement.getBoundingClientRect()
         if (bounds && event.clientX >= bounds.left && event.clientX <= bounds.right && event.clientY >= bounds.top && event.clientY <= bounds.bottom) {
           commitCanvasDrop(drag.payload, event.clientX - drag.offsetX, event.clientY - drag.offsetY)
         }
@@ -285,8 +329,14 @@ export default function useWorksheetController() {
   function save(kind) {
     if (!title.trim()) { setError('Give your worksheet a title before saving.'); return }
     if (publish && /\b(fuck|shit|bitch|asshole)\b/i.test(`${title} ${design.tags}`)) { setError('Please use classroom-appropriate titles and keywords.'); return }
-    try { problems.forEach(p => solveExpression(p.expression || design.rule, p.values || { A: p.a, B: p.b })) } catch (e) { setError(e.message); return }
-    const item = { id: crypto.randomUUID(), name: title.trim(), title: title.trim(), design: { ...structuredClone(design), canvasItems: structuredClone(canvasItems) }, problems: structuredClone(problems), count: problems.length, grade: design.grade, tags: design.tags, operator: design.operator, kind, date: new Date().toLocaleDateString(), color: 'sage', popularity: 0 }
+    let item
+    try {
+      const next = worksheet.template === design && problems.length === count ? worksheet : generateWorksheet()
+      item = next.toItem({ title: title.trim(), kind })
+    } catch (error) {
+      setError(error.message)
+      return
+    }
     return runStorageAction(async () => {
       if (profile) {
         setWorkspace(await accountRequest('library', { method: 'POST', body: { item, publish } }))
@@ -321,16 +371,10 @@ export default function useWorksheetController() {
   function signOut() {
     return runStorageAction(async () => {
       setWorkspace(await accountRequest('logout', { method: 'POST' }))
-      setDesign(structuredClone(initialDesign))
-      setCanvasItems(initialCanvasItems)
-      setTitle('Two-digit addition')
-      setCount(12)
-      setProblems(generate(initialDesign, 12))
-      setSelectedObject('operand-a')
-      setExpressionEdited(false)
-      setAnswers(false)
+      const initial = Worksheet.generate(new ProblemTemplate(), 12)
+      openWorksheet(initial, initial.template.name)
       setPublish(false)
-      setStep('design')
+      setActiveStep('design')
       setModal(null)
       navigate('Overview')
       toast('Signed out.')
@@ -345,12 +389,10 @@ export default function useWorksheetController() {
     })
   }
   function removeCanvasItem(id) {
-    const next = canvasItems.filter(item => item.id !== id)
-    setCanvasItems(next)
+    updateElements(canvasItems.filter(item => item.id !== id))
     if (selectedObject === id) setSelectedObject('')
-    if (!expressionEdited) setDesign(current => ({ ...current, rule: problemExpression(next) }))
   }
   return {
-    page, design, setDesign, title, setTitle, count, setCount, problems, selectedObject, dragPreview, canvasRef, canvasItems, setExpressionEdited, answers, setAnswers, saved, profile, modal, setModal, notice, search, setSearch, grade, setGrade, sort, setSort, tab, setTab, error, setError, publish, setPublish, step, setStep, help, setHelp, toast, navigate, useTemplate, updateOperandSettings, generateFromCanvas, changeOperand, beginCanvasDrag, beginPaletteDrag, updateSelectedObject, resizeAnswerObject, save, remove, catalog, authenticate, signOut, openAccount, importBrowserWork, importableCount: importable.length, busy: busy || loading, removeCanvasItem
+    page, design, setDesign, title, setTitle, count, setCount, problems, answerKey: answers ? worksheet.answerKey : null, selectedObject, selectCanvasItem: setSelectedObject, dragPreview, canvasRef, canvasItems, setExpression, addOperand, addOperator, answers, setAnswers, saved, profile, modal, setModal, notice, search, setSearch, grade, setGrade, sort, setSort, tab, setTab, error, setError, publish, setPublish, step, setStep, help, setHelp, toast, navigate, useTemplate, updateOperandSettings, generateFromCanvas, changeOperand, beginCanvasDrag, beginPaletteDrag, updateSelectedObject, resizeAnswerObject, save, remove, catalog, authenticate, signOut, openAccount, importBrowserWork, importableCount: importable.length, busy: busy || loading, removeCanvasItem
   }
 }
