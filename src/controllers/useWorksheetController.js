@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { initialDesign, symbols, drawOperand, generate, solveExpression, operandSettings } from '../models/worksheet.js'
 import { examples } from '../models/catalog.js'
-import { read, write, clear } from '../models/storage.js'
+import { read, write } from '../models/storage.js'
+import { workspaceRequest } from '../models/workspaceApi.js'
+
+const initialCanvasItems = [
+  { id: 'operand-a', type: 'operand', value: 'A', x: 20, y: 50 },
+  { id: 'operator', type: 'operator', value: '+', x: 50, y: 50 },
+  { id: 'operand-b', type: 'operand', value: 'B', x: 80, y: 50 },
+]
 
 export default function useWorksheetController() {
   const [page, setPage] = useState('Overview')
@@ -13,16 +20,18 @@ export default function useWorksheetController() {
   const [dragPreview, setDragPreview] = useState(null)
   const dragRef = useRef(null)
   const canvasRef = useRef(null)
-  const [canvasItems, setCanvasItems] = useState([
-    { id: 'operand-a', type: 'operand', value: 'A', x: 20, y: 50 },
-    { id: 'operator', type: 'operator', value: '+', x: 50, y: 50 },
-    { id: 'operand-b', type: 'operand', value: 'B', x: 80, y: 50 },
-  ])
+  const [canvasItems, setCanvasItems] = useState(initialCanvasItems)
   const [expressionEdited, setExpressionEdited] = useState(false)
   const [answers, setAnswers] = useState(false)
-  const [saved, setSaved] = useState(() => read('mf-saved', []))
-  const [publicItems, setPublicItems] = useState(() => read('mf-public', []))
-  const [profile, setProfile] = useState(() => read('mf-profile', null))
+  const [guestItems, setGuestItems] = useState(() => read('mf-saved', []))
+  const [legacyPublicItems] = useState(() => read('mf-public', []))
+  const [workspace, setWorkspace] = useState({ profile: null, saved: [], published: [] })
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const pending = useRef(false)
+  const { profile, published } = workspace
+  const saved = profile ? workspace.saved : guestItems
+  const importable = profile ? guestItems.filter(item => !workspace.saved.some(entry => entry.id === item.id)) : []
   const [modal, setModal] = useState(null)
   const [notice, setNotice] = useState('')
   const [search, setSearch] = useState('')
@@ -34,6 +43,47 @@ export default function useWorksheetController() {
   const [step, setStep] = useState('design')
   const [help, setHelp] = useState(false)
   function toast(message) { setNotice(message); window.setTimeout(() => setNotice(''), 4500) }
+  useEffect(() => {
+    const request = new AbortController()
+    workspaceRequest('workspace', { signal: request.signal })
+      .then(setWorkspace)
+      .catch(() => {
+        if (!request.signal.aborted) toast('Account storage is unavailable. Reload to reconnect.')
+      })
+      .finally(() => {
+        if (!request.signal.aborted) setLoading(false)
+      })
+    return () => request.abort()
+  }, [])
+
+  async function runStorageAction(action, reportError = setError) {
+    if (loading || pending.current) return
+    pending.current = true
+    setBusy(true)
+    setError('')
+    try {
+      await action()
+    } catch (error) {
+      reportError(error.message)
+    } finally {
+      pending.current = false
+      setBusy(false)
+    }
+  }
+
+  function accountRequest(path, options) {
+    return workspaceRequest(path, { ...options, accountId: profile.id })
+  }
+
+  function updateGuestLibrary(items) {
+    write('mf-saved', items)
+    setGuestItems(items)
+  }
+
+  function openAccount() {
+    setError('')
+    setModal('profile')
+  }
   function navigate(next) { setPage(next); setError(''); setSearch('') }
   function useTemplate(item) {
     setExpressionEdited(false)
@@ -237,24 +287,62 @@ export default function useWorksheetController() {
     if (publish && /\b(fuck|shit|bitch|asshole)\b/i.test(`${title} ${design.tags}`)) { setError('Please use classroom-appropriate titles and keywords.'); return }
     try { problems.forEach(p => solveExpression(p.expression || design.rule, p.values || { A: p.a, B: p.b })) } catch (e) { setError(e.message); return }
     const item = { id: crypto.randomUUID(), name: title.trim(), title: title.trim(), design: { ...structuredClone(design), canvasItems: structuredClone(canvasItems) }, problems: structuredClone(problems), count: problems.length, grade: design.grade, tags: design.tags, operator: design.operator, kind, date: new Date().toLocaleDateString(), color: 'sage', popularity: 0 }
-    const next = [item, ...saved]; setSaved(next); write('mf-saved', next)
-    if (publish) { const list = [item, ...publicItems]; setPublicItems(list); write('mf-public', list) }
-    setModal(null); setPublish(false); toast(`${kind} saved${publish ? ' and added to the demo catalog' : ' to your library'}.`)
+    return runStorageAction(async () => {
+      if (profile) {
+        setWorkspace(await accountRequest('library', { method: 'POST', body: { item, publish } }))
+      } else {
+        if (publish) throw new Error('Sign in to publish to the catalog.')
+        updateGuestLibrary([item, ...guestItems])
+      }
+      setModal(null)
+      setPublish(false)
+      toast(`${kind} saved${publish ? ' and published to the catalog' : ' to your library'}.`)
+    })
   }
-  function remove(id) { const next = saved.filter(item => item.id !== id); setSaved(next); write('mf-saved', next); toast('Removed from your library.') }
-  const catalog = [...publicItems, ...examples].filter(item => `${item.name} ${item.tags} ${item.grade}`.toLowerCase().includes(search.toLowerCase()) && (grade === 'All grades' || item.grade === grade) && (tab === 'Worksheets' ? item.kind !== 'Problem design' : item.kind !== 'Worksheet')).sort((a,b) => sort === 'popular' ? b.popularity-a.popularity : a.name.localeCompare(b.name))
-  function saveProfile(form) {
-    const data = new FormData(form)
-    const value = { name: data.get('name'), email: data.get('email') }
-    setProfile(value)
-    write('mf-profile', value)
-    setModal(null)
-    toast('Your demo profile is ready.')
+  function remove(id) {
+    return runStorageAction(async () => {
+      if (profile) {
+        setWorkspace(await accountRequest(`library/${id}`, { method: 'DELETE' }))
+      } else {
+        updateGuestLibrary(guestItems.filter(item => item.id !== id))
+      }
+      toast('Removed from your library.')
+    }, toast)
   }
-  function clearProfile() {
-    setProfile(null)
-    clear('mf-profile')
-    setModal(null)
+  const catalog = [...published, ...legacyPublicItems, ...examples].filter(item => `${item.name} ${item.tags} ${item.grade}`.toLowerCase().includes(search.toLowerCase()) && (grade === 'All grades' || item.grade === grade) && (tab === 'Worksheets' ? item.kind !== 'Problem design' : item.kind !== 'Worksheet')).sort((a,b) => sort === 'popular' ? b.popularity-a.popularity : a.name.localeCompare(b.name))
+  function authenticate(form, register) {
+    const body = Object.fromEntries(new FormData(form))
+    return runStorageAction(async () => {
+      setWorkspace(await workspaceRequest(register ? 'register' : 'login', { method: 'POST', body }))
+      setModal(null)
+      toast(register ? 'Your account is ready.' : 'Signed in.')
+    })
+  }
+  function signOut() {
+    return runStorageAction(async () => {
+      setWorkspace(await accountRequest('logout', { method: 'POST' }))
+      setDesign(structuredClone(initialDesign))
+      setCanvasItems(initialCanvasItems)
+      setTitle('Two-digit addition')
+      setCount(12)
+      setProblems(generate(initialDesign, 12))
+      setSelectedObject('operand-a')
+      setExpressionEdited(false)
+      setAnswers(false)
+      setPublish(false)
+      setStep('design')
+      setModal(null)
+      navigate('Overview')
+      toast('Signed out.')
+    })
+  }
+  function importBrowserWork() {
+    return runStorageAction(async () => {
+      for (const item of importable) {
+        setWorkspace(await accountRequest('library', { method: 'POST', body: { item, publish: false } }))
+      }
+      toast('Browser work copied to your private library.')
+    })
   }
   function removeCanvasItem(id) {
     const next = canvasItems.filter(item => item.id !== id)
@@ -263,6 +351,6 @@ export default function useWorksheetController() {
     if (!expressionEdited) setDesign(current => ({ ...current, rule: problemExpression(next) }))
   }
   return {
-    page, design, setDesign, title, setTitle, count, setCount, problems, selectedObject, dragPreview, canvasRef, canvasItems, setExpressionEdited, answers, setAnswers, saved, profile, modal, setModal, notice, search, setSearch, grade, setGrade, sort, setSort, tab, setTab, error, setError, publish, setPublish, step, setStep, help, setHelp, toast, navigate, useTemplate, updateOperandSettings, generateFromCanvas, changeOperand, beginCanvasDrag, beginPaletteDrag, updateSelectedObject, resizeAnswerObject, save, remove, catalog, saveProfile, clearProfile, removeCanvasItem
+    page, design, setDesign, title, setTitle, count, setCount, problems, selectedObject, dragPreview, canvasRef, canvasItems, setExpressionEdited, answers, setAnswers, saved, profile, modal, setModal, notice, search, setSearch, grade, setGrade, sort, setSort, tab, setTab, error, setError, publish, setPublish, step, setStep, help, setHelp, toast, navigate, useTemplate, updateOperandSettings, generateFromCanvas, changeOperand, beginCanvasDrag, beginPaletteDrag, updateSelectedObject, resizeAnswerObject, save, remove, catalog, authenticate, signOut, openAccount, importBrowserWork, importableCount: importable.length, busy: busy || loading, removeCanvasItem
   }
 }

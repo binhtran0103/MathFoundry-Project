@@ -5,3 +5,6 @@ dist
 .dockerignore
 Dockerfile
 docker-compose.yml
+.mathfoundry
+**/*.sqlite
+**/*.sqlite-*
