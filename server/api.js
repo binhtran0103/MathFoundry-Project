@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID, scrypt, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
-import { solveExpression } from '../src/models/worksheet.js'
+import { ProblemInstance } from '../src/models/worksheet.js'
 import { openDatabase } from './database.js'
 
 const deriveKey = promisify(scrypt)
@@ -80,22 +80,38 @@ function validateItem(item) {
       (item.description != null && typeof item.description !== 'string') ||
       !['Worksheet', 'Problem design'].includes(item.kind) ||
       typeof item.design?.rule !== 'string' ||
-      !validOperand(item.design.a) || !validOperand(item.design.b) ||
-      (item.design.operands != null && !Object.values(item.design.operands).every(validOperand)) ||
       !['operator', 'style', 'operandFont', 'grade', 'tags'].every(key =>
         item.design[key] == null || typeof item.design[key] === 'string') ||
       (item.design.canvasItems != null && !validCanvas(item.design.canvasItems)) ||
+      !validDesign(item.design) ||
+      (item.layout != null && !validLayout(item.layout)) ||
       !Array.isArray(item.problems) || item.count !== item.problems.length ||
       item.count > 30 || !item.problems.every(validProblem)) {
     throw new RequestError(400, 'This worksheet or problem design is invalid.')
   }
   try {
     for (const problem of item.problems) {
-      solveExpression(problem.expression || item.design.rule, problem.values || { A: problem.a, B: problem.b })
+      new ProblemInstance(problem, item.design.rule).solve()
     }
   } catch {
     throw new RequestError(400, 'This worksheet contains an invalid problem.')
   }
+}
+
+function validDesign(design) {
+  if (design.version !== 2) {
+    return validOperand(design.a) && validOperand(design.b) &&
+      (design.operands == null || Object.values(design.operands).every(validOperand))
+  }
+  if (!Array.isArray(design.canvasItems) || !validDimension(design.canvasWidth) ||
+      typeof design.expressionEdited !== 'boolean') return false
+  if (design.nextOperandNumber != null &&
+      (!Number.isSafeInteger(design.nextOperandNumber) || design.nextOperandNumber < 1)) return false
+  const operands = design.canvasItems.filter(item => item.type === 'operand')
+  return operands.length >= 2 &&
+    operands.every(item => /^[A-Z][A-Z0-9]*$/.test(item.value) && validOperand(item.constraint)) &&
+    new Set(operands.map(item => item.value)).size === operands.length &&
+    new Set(design.canvasItems.map(item => item.id)).size === design.canvasItems.length
 }
 
 function validOperand(config) {
@@ -111,13 +127,24 @@ function validCanvas(items) {
     (item.width == null || Number.isFinite(item.width)) && (item.height == null || Number.isFinite(item.height)))
 }
 
+function validDimension(value) {
+  return value == null || (Number.isFinite(value) && value > 0)
+}
+
+function validLayout(layout) {
+  return layout && typeof layout === 'object' && (Array.isArray(layout)
+    ? validCanvas(layout)
+    : validDimension(layout.canvasWidth) && validDimension(layout.canvasHeight) &&
+      (layout.items == null || validCanvas(layout.items)))
+}
+
 function validProblem(problem) {
   if (!problem || typeof problem !== 'object') return false
   const { a, b, answer, expression, layout, values } = problem
   return (answer == null || Number.isFinite(answer)) &&
     (a == null || Number.isFinite(a)) && (b == null || Number.isFinite(b)) &&
     (expression == null || typeof expression === 'string') &&
-    (layout == null || validCanvas(Array.isArray(layout) ? layout : layout.items)) &&
+    (layout == null || validLayout(layout)) &&
     (values == null || Object.values(values).every(value => value == null || Number.isFinite(value)))
 }
 
