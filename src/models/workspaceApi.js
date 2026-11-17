@@ -1,3 +1,4 @@
+// Sends a workspace API request and returns its response data.
 export async function workspaceRequest(path, { method = 'GET', body, accountId, signal } = {}) {
   const response = await fetch(`/api/${path}`, {
     method,
