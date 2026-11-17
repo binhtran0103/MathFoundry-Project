@@ -1,0 +1,9 @@
+import Icon from './components/Icon.jsx'
+import Cards from './components/Cards.jsx'
+
+// Renders catalog filters and matching templates.
+export default function CatalogView({ controller }) {
+  const { search, setSearch, grade, setGrade, sort, setSort, tab, setTab, catalog, useTemplate, remove } = controller
+
+  return <><div className="page-heading"><div><div className="eyebrow">GOOD IDEAS ARE BETTER SHARED</div><h1>A little inspiration for every lesson<span>.</span></h1><p>Explore ready-to-use practice, then add your own teaching touch.</p></div></div><div className="catalog-controls"><div className="search-box"><Icon name="search"/><input placeholder="Search skills, topics, or keywords…" aria-label="Search catalog" value={search} onChange={e => setSearch(e.target.value)}/></div><select aria-label="Filter by grade" value={grade} onChange={e => setGrade(e.target.value)}><option>All grades</option>{[1,2,3,4,5,6,7,8].map(n => <option key={n}>Grade {n}</option>)}</select><select aria-label="Sort catalog" value={sort} onChange={e => setSort(e.target.value)}><option value="popular">Most popular</option><option value="name">Name: A–Z</option></select></div><div className="catalog-tabs">{['Worksheets','Problem designs'].map(name => <button key={name} className={tab === name ? 'selected' : ''} onClick={() => setTab(name)}>{name}</button>)}<span>{catalog.length} results</span></div><p className="demo-disclosure">Popularity counts for sample worksheets are illustrative.</p>{catalog.length ? <Cards onOpen={useTemplate} onRemove={remove} items={catalog}/> : <div className="empty-state"><Icon name="search" size={34}/><h2>No matches just yet</h2><p>Try another keyword or grade level.</p><button className="secondary" onClick={() => { setSearch(''); setGrade('All grades') }}>Clear filters</button></div>}</>
+}

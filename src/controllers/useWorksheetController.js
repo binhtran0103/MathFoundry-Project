@@ -214,7 +214,7 @@ export default function useWorksheetController() {
     setError('')
   }
 
-  // Scrolls a newly added operand into view.
+  // Scrolls a newly added operand or operator into view.
   useEffect(() => {
     const id = revealElement.current
     const canvas = canvasRef.current
@@ -233,12 +233,10 @@ export default function useWorksheetController() {
     const canvas = canvasRef.current
     if (!canvas) return
     const bounds = canvas.getBoundingClientRect()
-    const [type, value] = payload.split(':')
-    const operators = canvasItems.filter(item => item instanceof Operator)
-    const operandCount = canvasItems.filter(item => item instanceof Operand).length
+    const [type, paletteValue] = payload.split(':')
+    const value = type === 'operator' ? '+' : paletteValue
     const replaced = canvasItems.find(item => item.id === value && type === 'move') ||
-      (type === 'style' && canvasItems.find(item => item.type === 'style')) ||
-      (type === 'operator' && operators.length === 1 && operandCount <= 2 && operators[0])
+      (type === 'style' && canvasItems.find(item => item.type === 'style'))
     const nodes = [...canvas.querySelectorAll('[data-canvas-id]')]
     const existing = replaced && nodes.find(node => node.dataset.canvasId === replaced.id)
     const width = existing?.offsetWidth || ({ answer: 120, bar: 160, style: 108, operator: 48 })[type]
@@ -274,19 +272,19 @@ export default function useWorksheetController() {
   }
 
   // Places an operator between adjacent operands.
-  function addOperator(symbol) {
+  function addOperator() {
     const bounds = canvasRef.current?.getBoundingClientRect()
     if (!bounds) return
     const arithmetic = canvasItems.filter(item => item instanceof Operand || item instanceof Operator)
       .sort((left, right) => left.x - right.x)
     const rightIndex = arithmetic.findIndex((item, index) => item instanceof Operand && arithmetic[index - 1] instanceof Operand)
     if (rightIndex === -1) {
-      setError('Drag the operator to a clear position on the canvas.')
+      setError('Add an operand to open another gap, or drag the operator to a clear space on the canvas.')
       return
     }
     const left = arithmetic[rightIndex - 1]
     const right = arithmetic[rightIndex]
-    revealElement.current = commitCanvasDrop('operator:' + symbol,
+    revealElement.current = commitCanvasDrop('operator',
       bounds.left + (left.x + right.x) * bounds.width / 200,
       bounds.top + (left.y + right.y) * bounds.height / 200)
   }
@@ -340,7 +338,7 @@ export default function useWorksheetController() {
       if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 3) drag.moved = true
       if (drag.moved) {
         const item = drag.id && canvasItems.find(object => object.id === drag.id)
-        const label = item?.label ?? drag.payload.split(':')[1]
+        const label = item?.label ?? (drag.payload === 'operator' ? 'Operator' : drag.payload.split(':')[1])
         setDragPreview({ label, x: event.clientX, y: event.clientY })
       }
     }
