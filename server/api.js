@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID, scrypt, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
 import { ProblemInstance } from '../src/models/worksheet.js'
-import { openDatabase } from './database.js'
+import { openWorkspaceStore } from './database.js'
 
 const deriveKey = promisify(scrypt)
 const cookieName = 'mf_session'
@@ -164,25 +164,8 @@ function validProblem(problem) {
 
 // Creates the workspace API and opens its database.
 export function createApi(path, { origin, secureCookies = false } = {}) {
-  const db = openDatabase(path)
+  const store = openWorkspaceStore(path)
   const authAttempts = new Map()
-  const getUser = db.prepare(`
-    SELECT users.id, users.name, users.email FROM sessions JOIN users ON users.id = sessions.user_id
-    WHERE token_hash = ? AND expires_at > ?
-  `)
-  const getCredentials = db.prepare('SELECT * FROM users WHERE email = ?')
-  const insertUser = db.prepare('INSERT INTO users VALUES (?, ?, ?, ?, ?) ON CONFLICT(email) DO NOTHING')
-  const insertSession = db.prepare('INSERT INTO sessions VALUES (?, ?, ?)')
-  const deleteSession = db.prepare('DELETE FROM sessions WHERE token_hash = ?')
-  const deleteExpired = db.prepare('DELETE FROM sessions WHERE expires_at <= ?')
-  const listItems = db.prepare('SELECT payload FROM library_items WHERE user_id = ? AND in_library = 1 ORDER BY created_at DESC, rowid DESC')
-  const listPublic = db.prepare('SELECT user_id, item_id, payload FROM library_items WHERE published = 1 ORDER BY created_at DESC, rowid DESC')
-  const insertItem = db.prepare(`
-    INSERT INTO library_items (user_id, item_id, payload, published, created_at)
-    VALUES (?, ?, ?, ?, ?) ON CONFLICT(user_id, item_id) DO UPDATE SET in_library = 1
-  `)
-  const removeItem = db.prepare('DELETE FROM library_items WHERE user_id = ? AND item_id = ? AND published = 0')
-  const hideItem = db.prepare('UPDATE library_items SET in_library = 0 WHERE user_id = ? AND item_id = ? AND published = 1')
 
   // Limits account attempts by client address.
   function checkAuthLimit(request) {
@@ -203,8 +186,8 @@ export function createApi(path, { origin, secureCookies = false } = {}) {
   function workspace(user) {
     return {
       profile: user ?? null,
-      saved: user ? listItems.all(user.id).map(row => JSON.parse(row.payload)) : [],
-      published: listPublic.all().map(row => ({ ...JSON.parse(row.payload), id: `${row.user_id}/${row.item_id}` })),
+      saved: user ? store.listSaved(user.id) : [],
+      published: store.listPublished(),
     }
   }
 
@@ -217,7 +200,7 @@ export function createApi(path, { origin, secureCookies = false } = {}) {
     }
     const token = headers.cookie?.split(';').map(value => value.trim()).find(value => value.startsWith(`${cookieName}=`))?.slice(cookieName.length + 1)
     const tokenHash = token ? hashToken(token) : null
-    const user = getUser.get(tokenHash, Date.now())
+    const user = store.getUser(tokenHash, Date.now())
 
     if (method === 'GET' && pathname === '/api/workspace') return send(response, 200, workspace(user))
 
@@ -225,7 +208,7 @@ export function createApi(path, { origin, secureCookies = false } = {}) {
     if (method === 'POST' && (register || pathname === '/api/login')) {
       checkAuthLimit(request)
       const { name, email, password } = normalizeCredentials(await readJson(request), register)
-      const existing = register ? null : getCredentials.get(email)
+      const existing = register ? null : store.getCredentials(email)
       const salt = existing?.salt || randomBytes(16).toString('hex')
       const hash = await deriveKey(password, salt, 64, { N: 32768, r: 8, p: 3, maxmem: 64 * 1024 * 1024 })
       if (!register && (!existing || !timingSafeEqual(hash, Buffer.from(existing.password_hash, 'hex')))) {
@@ -233,18 +216,10 @@ export function createApi(path, { origin, secureCookies = false } = {}) {
       }
       const profile = { id: existing?.id || randomUUID(), name: existing?.name || name, email }
       const newToken = randomBytes(32).toString('hex')
-      db.exec('BEGIN IMMEDIATE')
-      try {
-        if (register && !insertUser.run(profile.id, name, email, salt, hash.toString('hex')).changes) {
-          throw new RequestError(409, 'An account with this email already exists.')
-        }
-        deleteExpired.run(Date.now())
-        if (tokenHash) deleteSession.run(tokenHash)
-        insertSession.run(hashToken(newToken), profile.id, Date.now() + sessionSeconds * 1000)
-        db.exec('COMMIT')
-      } catch (error) {
-        db.exec('ROLLBACK')
-        throw error
+      const credentials = register ? { salt, passwordHash: hash.toString('hex') } : null
+      const now = Date.now()
+      if (!store.startSession(profile, credentials, hashToken(newToken), tokenHash, now, now + sessionSeconds * 1000)) {
+        throw new RequestError(409, 'An account with this email already exists.')
       }
       setSessionCookie(response, newToken, sessionSeconds, secureCookies)
       return send(response, register ? 201 : 200, workspace(profile))
@@ -261,23 +236,25 @@ export function createApi(path, { origin, secureCookies = false } = {}) {
     }
 
     if (pathname === '/api/logout') {
-      deleteSession.run(tokenHash)
+      store.deleteSession(tokenHash)
       setSessionCookie(response, '', 0, secureCookies)
       return send(response, 200, workspace(null))
     }
     if (method === 'DELETE') {
-      removeItem.run(user.id, itemId)
-      hideItem.run(user.id, itemId)
+      store.removeItem(user.id, itemId)
       return send(response, 200, workspace(user))
     }
 
     const { item, publish } = await readJson(request)
     validateItem(item)
-    if (!getUser.get(tokenHash, Date.now())) throw new RequestError(401, 'Sign in again to save your work.')
+    if (!store.getUser(tokenHash, Date.now())) throw new RequestError(401, 'Sign in again to save your work.')
     if (publish === true && /\b(fuck|shit|bitch|asshole)\b/i.test(`${item.title} ${item.tags}`)) {
       throw new RequestError(400, 'Please use classroom-appropriate titles and keywords.')
     }
-    insertItem.run(user.id, item.id, JSON.stringify({ ...item, name: item.title, popularity: 0 }), Number(publish === true), Date.now())
+    if (!store.saveItem(user.id, item, publish === true, Date.now())) {
+      const kind = item.kind === 'Worksheet' ? 'worksheets' : 'problem templates'
+      throw new RequestError(409, `Your account has reached the storage limit for ${kind}. Delete a private item of the same type to free a slot.`)
+    }
     return send(response, 200, workspace(user))
   }
 
@@ -293,6 +270,6 @@ export function createApi(path, { origin, secureCookies = false } = {}) {
       })
     },
     // Closes the workspace database.
-    close: () => db.close(),
+    close: store.close,
   }
 }
