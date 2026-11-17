@@ -5,6 +5,7 @@ import { createApi } from './server/api.js'
 
 const databasePath = resolve(process.env.MATHFOUNDRY_DB || '.mathfoundry/mathfoundry.sqlite')
 
+// Adds the workspace API to Vite and closes it when the server shuts down.
 function mountApi(server) {
   for (const directory of [server.config.publicDir, resolve(server.config.root, server.config.build.outDir)]) {
     if (!directory) continue

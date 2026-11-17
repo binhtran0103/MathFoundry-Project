@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
+// Opens the SQLite database and initializes its schema.
 export function openDatabase(path) {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
   const db = new DatabaseSync(path)

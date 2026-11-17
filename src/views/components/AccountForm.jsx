@@ -1,5 +1,6 @@
 import { useState } from 'react'
 
+// Renders account details or the sign-in and registration form.
 export default function AccountForm({ profile, busy, error, clearError, authenticate, signOut }) {
   const [register, setRegister] = useState(false)
 

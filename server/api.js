@@ -9,13 +9,16 @@ const sessionSeconds = 60 * 60 * 24 * 7
 const maxBodySize = 512 * 1024
 const itemIdPattern = /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i
 
+// Represents an API error with an HTTP status.
 class RequestError extends Error {
+  // Stores the status and message for the error response.
   constructor(status, message) {
     super(message)
     this.status = status
   }
 }
 
+// Sends a JSON response with the given HTTP status.
 function send(response, status, data) {
   response.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
@@ -25,6 +28,7 @@ function send(response, status, data) {
   response.end(JSON.stringify(data))
 }
 
+// Reads and parses a JSON request body within the size limit.
 async function readJson(request) {
   if (request.headers['content-type']?.split(';')[0] !== 'application/json') {
     throw new RequestError(415, 'Send a JSON request.')
@@ -49,14 +53,17 @@ async function readJson(request) {
   throw new RequestError(400, 'Send a JSON object.')
 }
 
+// Hashes a session token before database storage or lookup.
 function hashToken(token) {
   return createHash('sha256').update(token).digest('hex')
 }
 
+// Sets or clears the browser's session cookie.
 function setSessionCookie(response, token, maxAge, secure) {
   response.setHeader('Set-Cookie', `${cookieName}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure ? '; Secure' : ''}`)
 }
 
+// Normalizes and validates the submitted account details.
 function normalizeCredentials(body, register) {
   const name = typeof body.name === 'string' ? body.name.trim() : ''
   const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : ''
@@ -73,6 +80,7 @@ function normalizeCredentials(body, register) {
   return { name, email, password }
 }
 
+// Checks that a worksheet or design is valid before saving.
 function validateItem(item) {
   if (typeof item?.id !== 'string' || !itemIdPattern.test(item.id) ||
       typeof item.title !== 'string' || !item.title.trim() ||
@@ -98,6 +106,7 @@ function validateItem(item) {
   }
 }
 
+// Checks the settings for legacy and current problem designs.
 function validDesign(design) {
   if (design.version !== 2) {
     return validOperand(design.a) && validOperand(design.b) &&
@@ -114,12 +123,14 @@ function validDesign(design) {
     new Set(design.canvasItems.map(item => item.id)).size === design.canvasItems.length
 }
 
+// Checks the shape of an operand's generation settings.
 function validOperand(config) {
   return ['random', 'fixed'].includes(config?.mode) &&
     ['min', 'max', 'multiple', 'value'].every(key =>
       config[key] == null || typeof config[key] === 'string' || Number.isFinite(config[key]))
 }
 
+// Checks the types and positions of saved canvas items.
 function validCanvas(items) {
   return Array.isArray(items) && items.every(item =>
     typeof item?.id === 'string' && ['operand', 'operator', 'style', 'answer', 'bar'].includes(item.type) &&
@@ -127,10 +138,12 @@ function validCanvas(items) {
     (item.width == null || Number.isFinite(item.width)) && (item.height == null || Number.isFinite(item.height)))
 }
 
+// Accepts an omitted dimension or a finite positive size.
 function validDimension(value) {
   return value == null || (Number.isFinite(value) && value > 0)
 }
 
+// Checks a saved layout and any canvas items it contains.
 function validLayout(layout) {
   return layout && typeof layout === 'object' && (Array.isArray(layout)
     ? validCanvas(layout)
@@ -138,6 +151,7 @@ function validLayout(layout) {
       (layout.items == null || validCanvas(layout.items)))
 }
 
+// Checks the saved fields for an individual problem.
 function validProblem(problem) {
   if (!problem || typeof problem !== 'object') return false
   const { a, b, answer, expression, layout, values } = problem
@@ -148,6 +162,7 @@ function validProblem(problem) {
     (values == null || Object.values(values).every(value => value == null || Number.isFinite(value)))
 }
 
+// Creates the workspace API and opens its database.
 export function createApi(path, { origin, secureCookies = false } = {}) {
   const db = openDatabase(path)
   const authAttempts = new Map()
@@ -169,6 +184,7 @@ export function createApi(path, { origin, secureCookies = false } = {}) {
   const removeItem = db.prepare('DELETE FROM library_items WHERE user_id = ? AND item_id = ? AND published = 0')
   const hideItem = db.prepare('UPDATE library_items SET in_library = 0 WHERE user_id = ? AND item_id = ? AND published = 1')
 
+  // Limits account attempts by client address.
   function checkAuthLimit(request) {
     const now = Date.now()
     for (const [address, attempt] of authAttempts) {
@@ -183,6 +199,7 @@ export function createApi(path, { origin, secureCookies = false } = {}) {
     authAttempts.set(address, attempt)
   }
 
+  // Collects the current profile, saved work, and public catalog.
   function workspace(user) {
     return {
       profile: user ?? null,
@@ -191,6 +208,7 @@ export function createApi(path, { origin, secureCookies = false } = {}) {
     }
   }
 
+  // Routes API requests and sends the corresponding workspace response.
   async function handle(request, response, pathname) {
     const { method, headers } = request
     if (method !== 'GET' && (headers['sec-fetch-site'] === 'cross-site' ||
@@ -264,6 +282,7 @@ export function createApi(path, { origin, secureCookies = false } = {}) {
   }
 
   return {
+    // Passes API requests to the handler and forwards other requests.
     middleware(request, response, next) {
       const pathname = request.url?.split('?')[0]
       if (!pathname?.startsWith('/api/')) return next()
@@ -273,6 +292,7 @@ export function createApi(path, { origin, secureCookies = false } = {}) {
         send(response, 500, { error: 'MathFoundry could not complete the request.' })
       })
     },
+    // Closes the workspace database.
     close: () => db.close(),
   }
 }

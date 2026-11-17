@@ -1,3 +1,4 @@
+import OperandIdForm from './components/OperandIdForm.jsx'
 import Icon from './components/Icon.jsx'
 import Cards from './components/Cards.jsx'
 import AccountForm from './components/AccountForm.jsx'
@@ -5,9 +6,11 @@ import { symbols, operandSettings } from '../models/worksheet.js'
 import { examples } from '../models/catalog.js'
 import './styles/App.css'
 
+// Renders the workspace pages using the worksheet controller.
 export default function MathFoundryView({ controller }) {
-  const { page, design, setDesign, title, setTitle, count, setCount, problems, answerKey, selectedObject, dragPreview, canvasRef, canvasItems, setExpression, addOperand, addOperator, selectCanvasItem, answers, setAnswers, saved, profile, modal, setModal, notice, search, setSearch, grade, setGrade, sort, setSort, tab, setTab, error, setError, publish, setPublish, step, setStep, help, setHelp, navigate, useTemplate, updateOperandSettings, generateFromCanvas, changeOperand, beginCanvasDrag, beginPaletteDrag, updateSelectedObject, resizeAnswerObject, save, remove, catalog, authenticate, signOut, openAccount, importBrowserWork, importableCount, busy, removeCanvasItem } = controller
+  const { page, design, setDesign, title, setTitle, count, setCount, problems, answerKey, selectedObject, dragPreview, canvasRef, canvasItems, setExpression, addOperand, addOperator, selectCanvasItem, answers, setAnswers, saved, profile, modal, setModal, notice, search, setSearch, grade, setGrade, sort, setSort, tab, setTab, error, setError, publish, setPublish, step, setStep, help, setHelp, navigate, useTemplate, renameOperand, updateOperandSettings, generateFromCanvas, changeOperand, beginCanvasDrag, beginPaletteDrag, updateSelectedObject, resizeAnswerObject, save, remove, catalog, authenticate, signOut, openAccount, importBrowserWork, importableCount, busy, removeCanvasItem } = controller
   const navItems = [['Overview', 'grid'], ['Create worksheet', 'pen'], ['Explore catalog', 'book'], ['My library', 'folder']]
+  // Renders the problem canvas and its object palette.
   function renderProblemEditor() {
     return <div className="problem-builder">
       <div className="expression-card">
@@ -29,7 +32,7 @@ export default function MathFoundryView({ controller }) {
             onClick={event => { if (event.detail === 0) selectCanvasItem(item.id) }}
             onContextMenu={event => { event.preventDefault(); removeCanvasItem(item.id) }}
           >
-            {item.type === 'bar' ? null : item.label}
+            {item.type === 'operand' ? <span className="canvas-operand-id" title={item.value}>{item.value}</span> : item.type === 'bar' ? null : item.label}
             {item.type === 'operand' && <small>Operand</small>}
           </button>)}
         </div>
@@ -50,7 +53,8 @@ export default function MathFoundryView({ controller }) {
       {dragPreview && <div className="canvas-drag-ghost" style={{ left: dragPreview.x, top: dragPreview.y }}>{dragPreview.label}</div>}
     </div>
   }
-  function renderWorksheetProblem(problem, index) {
+  // Resolves a problem's display objects and canvas dimensions.
+  function getWorksheetScene(problem) {
     const layout = problem.layout
     const items = Array.isArray(layout) ? layout : layout.items || canvasItems
     const sourceWidth = Array.isArray(layout) ? 700 : layout.canvasWidth || 700
@@ -70,11 +74,17 @@ export default function MathFoundryView({ controller }) {
     }), { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity })
     const sceneWidth = Math.max(1, maxX - minX)
     const sceneHeight = Math.max(1, maxY - minY)
+    return { objects, minX, minY, sceneWidth, sceneHeight }
+  }
+
+  // Renders a worksheet problem with editable operand values.
+  function renderWorksheetProblem(problem, index) {
+    const { objects, minX, minY, sceneWidth, sceneHeight } = worksheetScenes[index]
     const { values } = problem
-    return <div className={`problem ${design.style}`} key={index}><span className="problem-number">{String(index+1).padStart(2,'0')}</span><div className="snapshot-viewport"><div className="problem-layout-snapshot" style={{ '--scene-ratio': `${sceneWidth} / ${sceneHeight}` }}>{objects.map(item => {
+    return <div className={`problem ${design.style}`} key={index}><span className="problem-number">{String(index+1).padStart(2,'0')}</span><div className="snapshot-viewport"><div className="problem-layout-snapshot" style={{ '--scene-ratio': `${sceneWidth} / ${sceneHeight}`, fontSize: operandFontSize }}>{objects.map(item => {
       const position = { left: `${(item.centerX - minX) / sceneWidth * 100}%`, top: `${(item.centerY - minY) / sceneHeight * 100}%`, width: `${item.sourceWidth / sceneWidth * 100}%`, height: `${item.sourceHeight / sceneHeight * 100}%`, '--token-font-size': `${18 / sceneWidth * 100}cqw` }
       return item.type === 'operand'
-        ? <div key={item.id} className="snapshot-token snapshot-operand" style={{ ...position, '--width-font': `${150 / Math.max(1, String(values[item.value] ?? '').length)}cqw` }}><input aria-label={`Problem ${index+1} operand ${item.value}`} type="number" value={values[item.value] ?? ''} onChange={e => changeOperand(index,item.value,e.target.value)}/>{operandSettings(design,item.value)?.mode === 'random' && <button title={`Reroll operand ${item.value}`} onClick={() => changeOperand(index,item.value)}><Icon name="refresh" size={11}/></button>}</div>
+        ? <div key={item.id} className="snapshot-token snapshot-operand" style={position}><input aria-label={`Problem ${index+1} operand ${item.value}`} type="number" value={values[item.value] ?? ''} onChange={e => changeOperand(index,item.value,e.target.value)}/>{operandSettings(design,item.value)?.mode === 'random' && <button title={`Reroll operand ${item.value}`} onClick={() => changeOperand(index,item.value)}><Icon name="refresh" size={11}/></button>}</div>
         : item.type === 'operator'
           ? <span key={item.id} className="snapshot-token snapshot-operator" style={position}><span className="snapshot-operator-glyph">{symbols[item.value] || item.value}</span></span>
           : item.type === 'answer'
@@ -82,9 +92,12 @@ export default function MathFoundryView({ controller }) {
             : <div key={item.id} className="snapshot-token snapshot-bar" style={position}/>
     })}</div></div></div>
   }
-  function renderOperandSettings({ id, value: name, constraint: config }) {
-    return <div className="operand-settings active-operand"><div className="operand-header"><strong><span>{name}</span> Operand {name}</strong><select aria-label={`Operand ${name} generation mode`} value={config.mode} onChange={e => updateOperandSettings(id,{ mode:e.target.value })}><option value="random">Random</option><option value="fixed">Manual</option></select></div>{config.mode === 'fixed' ? <label>Value<input type="number" value={config.value} onChange={e => updateOperandSettings(id,{ value:e.target.value })}/></label> : <><div className="input-row"><label>Minimum<input type="number" value={config.min} onChange={e => updateOperandSettings(id,{ min:e.target.value })}/></label><label>Maximum<input type="number" value={config.max} onChange={e => updateOperandSettings(id,{ max:e.target.value })}/></label></div><label>Number constraint<select value={config.multiple} onChange={e => updateOperandSettings(id,{ multiple:Number(e.target.value) })}><option value={1}>Any integer</option><option value={10}>Multiples of 10</option><option value={100}>Multiples of 100</option><option value={5}>Multiples of 5</option><option value={12}>Multiples of 12</option></select></label></>}</div>
+  // Renders controls for an operand's label and generation settings.
+  function renderOperandSettings(operand) {
+    const { id, value: name, constraint: config } = operand
+    return <div className="operand-settings active-operand"><OperandIdForm key={id + ':' + name} operand={operand} renameOperand={renameOperand}/><div className="operand-header"><strong><span>{name}</span> Operand {name}</strong><select aria-label={`Operand ${name} generation mode`} value={config.mode} onChange={e => updateOperandSettings(id,{ mode:e.target.value })}><option value="random">Random</option><option value="fixed">Manual</option></select></div>{config.mode === 'fixed' ? <label>Value<input type="number" value={config.value} onChange={e => updateOperandSettings(id,{ value:e.target.value })}/></label> : <><div className="input-row"><label>Minimum<input type="number" value={config.min} onChange={e => updateOperandSettings(id,{ min:e.target.value })}/></label><label>Maximum<input type="number" value={config.max} onChange={e => updateOperandSettings(id,{ max:e.target.value })}/></label></div><label>Number constraint<select value={config.multiple} onChange={e => updateOperandSettings(id,{ multiple:Number(e.target.value) })}><option value={1}>Any integer</option><option value={10}>Multiples of 10</option><option value={100}>Multiples of 100</option><option value={5}>Multiples of 5</option><option value={12}>Multiples of 12</option></select></label></>}</div>
   }
+  // Shows the settings for the selected canvas object.
   function renderSelectedObjectSettings() {
     const item = canvasItems.find(object => object.id === selectedObject)
     if (!item) return <p className="selection-hint">Select one canvas object to edit its settings.</p>
@@ -97,6 +110,20 @@ export default function MathFoundryView({ controller }) {
   const worksheetColumns = problems.length <= 8 ? 2 : problems.length <= 16 ? 3 : problems.length <= 24 ? 4 : 5
   const worksheetRows = Math.ceil(problems.length / worksheetColumns)
   const worksheetFontSize = Math.max(9, Math.min(19, 24 - worksheetRows * 1.25))
+  const worksheetScenes = step === 'worksheet' ? problems.map(getWorksheetScene) : []
+  let widthFit = Infinity
+  let heightFit = Infinity
+  worksheetScenes.forEach(({ objects, sceneWidth, sceneHeight }, index) => {
+    for (const item of objects) {
+      if (item.type !== 'operand') continue
+      const length = String(problems[index].values[item.value] ?? '').length
+      // Reserve 0.7 em per character for tabular digits, signs, and decimal points.
+      const fit = Math.min(item.sourceHeight, item.sourceWidth / (0.7 * Math.max(1, length)))
+      widthFit = Math.min(widthFit, fit / sceneWidth)
+      heightFit = Math.min(heightFit, fit / sceneHeight)
+    }
+  })
+  const operandFontSize = Number.isFinite(widthFit) ? `min(${widthFit * 100}cqw, ${heightFit * 100}cqh)` : undefined
   return <div className="app-shell">
     <aside className="sidebar"><a className="brand" href="#" onClick={e => { e.preventDefault(); navigate('Overview') }}><span className="brand-mark">m<span>ƒ</span></span><span>MathFoundry<span className="brand-dot">.</span></span></a><div className="workspace-label">TEACHER WORKSPACE</div><nav>{navItems.map(([label, icon]) => <button className={page === label ? 'nav-item active' : 'nav-item'} key={label} onClick={() => navigate(label)}><Icon name={icon}/>{label}{label === 'My library' && <span className="nav-count">{saved.length}</span>}</button>)}</nav><div className="sidebar-note"><span className="little-spark">✦</span><h3>Less prep.<br/>More possibilities.</h3><p>A little inspiration for your next great lesson.</p><button onClick={() => navigate('Explore catalog')}>Find your next worksheet <Icon name="arrow" size={16}/></button></div><div className="sidebar-bottom"><button className="nav-item" onClick={() => setHelp(true)}><span className="help-icon">?</span>Quick guide</button><button className="profile" onClick={openAccount}><span className="avatar">{profile?.name?.slice(0,1).toUpperCase() || 'T'}</span><span><strong>{profile?.name || 'Teacher workspace'}</strong><small>{profile ? 'Manage account' : 'Sign in or create an account'}</small></span><Icon name="chevron" size={16}/></button></div></aside>
     <div className="main-shell"><header className="topbar"><div><span className="breadcrumb">Workspace</span><Icon name="chevron" size={13}/><span>{page}</span></div><div><button className="avatar small" onClick={openAccount} aria-label="Open account">{profile?.name?.slice(0,1).toUpperCase() || 'T'}</button></div></header>

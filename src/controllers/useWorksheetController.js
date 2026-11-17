@@ -6,6 +6,7 @@ import { examples } from '../models/catalog.js'
 import { read, write } from '../models/storage.js'
 import { workspaceRequest } from '../models/workspaceApi.js'
 
+// Manages worksheet editing, navigation, and workspace actions.
 export default function useWorksheetController() {
   const [page, setPage] = useState('Overview')
   const [worksheet, setWorksheet] = useState(() => Worksheet.generate(new ProblemTemplate(), 12))
@@ -40,7 +41,9 @@ export default function useWorksheetController() {
   const [publish, setPublish] = useState(false)
   const [step, setActiveStep] = useState('design')
   const [help, setHelp] = useState(false)
+  // Shows a temporary notice.
   function toast(message) { setNotice(message); window.setTimeout(() => setNotice(''), 4500) }
+  // Loads the workspace on mount and cancels the request on unmount.
   useEffect(() => {
     const request = new AbortController()
     workspaceRequest('workspace', { signal: request.signal })
@@ -54,6 +57,7 @@ export default function useWorksheetController() {
     return () => request.abort()
   }, [])
 
+  // Runs one storage action at a time and reports errors.
   async function runStorageAction(action, reportError = setError) {
     if (loading || pending.current) return
     pending.current = true
@@ -69,20 +73,25 @@ export default function useWorksheetController() {
     }
   }
 
+  // Sends a workspace request for the current account.
   function accountRequest(path, options) {
     return workspaceRequest(path, { ...options, accountId: profile.id })
   }
 
+  // Saves guest work in the browser and updates the displayed library.
   function updateGuestLibrary(items) {
     write('mf-saved', items)
     setGuestItems(items)
   }
 
+  // Opens the account dialog and clears the previous error.
   function openAccount() {
     setError('')
     setModal('profile')
   }
+  // Switches pages and clears the current error and search.
   function navigate(next) { setPage(next); setError(''); setSearch('') }
+  // Loads a worksheet and resets the editor selection and answer display.
   function openWorksheet(next, nextTitle) {
     setWorksheet(next)
     setTemplate(next.template)
@@ -92,6 +101,7 @@ export default function useWorksheetController() {
     setShowAnswers(false)
   }
 
+  // Opens a library or catalog item in the worksheet workshop.
   function useTemplate(item) {
     try {
       const next = profile?.openSavedWork(item.id) || Worksheet.fromItem(item)
@@ -104,23 +114,39 @@ export default function useWorksheetController() {
     }
   }
 
+  // Updates the solution expression and marks it as manually edited.
   function setExpression(rule) {
     setTemplate(current => current.with({ rule, expressionEdited: true }))
     setError('')
   }
 
+  // Applies design changes to the editor and the matching worksheet.
   function setDesign(patch) {
     const next = design.with(patch)
     setTemplate(next)
     if (worksheet.template === design) setWorksheet(worksheet.withPresentation(next))
   }
 
+  // Renames an operand in the design and its matching worksheet.
+  function renameOperand(id, input) {
+    if (worksheet.template === design) {
+      const next = worksheet.renameOperand(id, input)
+      setWorksheet(next)
+      setTemplate(next.template)
+    } else {
+      setTemplate(design.renameOperand(id, input))
+    }
+    setError('')
+  }
+
+  // Changes the generation settings for the specified operand.
   function updateOperandSettings(id, patch) {
     setTemplate(current => current.with({
       canvasItems: current.canvasItems.map(item => item.id === id ? item.withSettings(patch) : item),
     }))
   }
 
+  // Generates problems with the current design and canvas dimensions.
   function generateWorksheet() {
     const bounds = canvasRef.current?.getBoundingClientRect()
     const layout = design.layout(bounds?.width || design.canvasWidth || worksheet.layout.canvasWidth,
@@ -128,6 +154,7 @@ export default function useWorksheetController() {
     return Worksheet.generate(design, count, layout)
   }
 
+  // Generates a worksheet and opens its preview.
   function generateFromCanvas() {
     try {
       setWorksheet(generateWorksheet())
@@ -139,6 +166,7 @@ export default function useWorksheetController() {
     }
   }
 
+  // Switches workshop steps and regenerates the preview when needed.
   function setStep(next) {
     if (next === 'worksheet' && (worksheet.template !== design || problems.length !== count)) {
       generateFromCanvas()
@@ -147,6 +175,7 @@ export default function useWorksheetController() {
     setActiveStep(next)
   }
 
+  // Edits or rerolls one operand in a worksheet problem.
   function changeOperand(index, name, value) {
     try {
       setWorksheet(worksheet.changeOperand(index, name, value))
@@ -156,6 +185,7 @@ export default function useWorksheetController() {
     }
   }
 
+  // Toggles the answer key when a worksheet has answers.
   function setAnswers(show) {
     try {
       if (show && worksheet.answerKey.solutions.length === 0) throw new Error('Generate a worksheet to see its answers.')
@@ -166,11 +196,13 @@ export default function useWorksheetController() {
     }
   }
 
+  // Updates the canvas items and applies any additional design changes.
   function updateElements(items, patch) {
     setTemplate(current => current.withElements(items).with(patch))
     setError('')
   }
 
+  // Adds an operand to the canvas and selects it for editing.
   function addOperand() {
     const width = canvasRef.current?.getBoundingClientRect().width
     if (!width) return
@@ -182,6 +214,7 @@ export default function useWorksheetController() {
     setError('')
   }
 
+  // Scrolls a newly added operand into view.
   useEffect(() => {
     const id = revealElement.current
     const canvas = canvasRef.current
@@ -195,6 +228,7 @@ export default function useWorksheetController() {
     if (element.left < visible.left) viewport.scrollLeft += element.left - visible.left - 12
     if (element.right > visible.right) viewport.scrollLeft += element.right - visible.right + 12
   }, [design])
+  // Checks the drop position and applies a valid canvas change.
   function commitCanvasDrop(payload, clientX, clientY) {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -239,6 +273,7 @@ export default function useWorksheetController() {
     return id
   }
 
+  // Places an operator between adjacent operands.
   function addOperator(symbol) {
     const bounds = canvasRef.current?.getBoundingClientRect()
     if (!bounds) return
@@ -255,23 +290,27 @@ export default function useWorksheetController() {
       bounds.left + (left.x + right.x) * bounds.width / 200,
       bounds.top + (left.y + right.y) * bounds.height / 200)
   }
+  // Starts dragging an existing canvas object.
   function beginCanvasDrag(event, item) {
     event.preventDefault()
     const rect = event.currentTarget.getBoundingClientRect()
     dragRef.current = { payload: `move:${item.id}`, id: item.id, startX: event.clientX, startY: event.clientY, offsetX: event.clientX - (rect.left + rect.width / 2), offsetY: event.clientY - (rect.top + rect.height / 2), source: 'canvas', moved: false }
     setDragPreview(null)
   }
+  // Starts dragging a new object from the palette.
   function beginPaletteDrag(event, payload) {
     event.preventDefault()
     dragRef.current = { payload, startX: event.clientX, startY: event.clientY, offsetX: 0, offsetY: 0, source: 'palette', moved: false }
     setDragPreview(null)
   }
+  // Changes the value of the selected canvas object.
   function updateSelectedObject(value) {
     const item = canvasItems.find(object => object.id === selectedObject)
     if (!item) return
     const items = canvasItems.map(object => object.id === item.id ? object.with({ value }) : object)
     updateElements(items, item instanceof Operator ? { operator: value } : { style: value })
   }
+  // Resizes a selected answer space or divider if there is room.
   function resizeAnswerObject(dimension, rawValue) {
     const selected = canvasItems.find(object => object.id === selectedObject && ['answer','bar'].includes(object.type))
     const bounds = canvasRef.current?.getBoundingClientRect()
@@ -292,7 +331,9 @@ export default function useWorksheetController() {
     setTemplate(current => current.with({ canvasItems: current.canvasItems.map(item => item.id === selected.id ? item.with({ [dimension]: value }) : item) }))
     setError('')
   }
+  // Registers pointer listeners for canvas and palette dragging.
   useEffect(() => {
+    // Tracks pointer movement and updates the drag preview.
     const onMove = event => {
       const drag = dragRef.current
       if (!drag) return
@@ -303,6 +344,7 @@ export default function useWorksheetController() {
         setDragPreview({ label, x: event.clientX, y: event.clientY })
       }
     }
+    // Finishes the drag and applies the drop when appropriate.
     const onUp = event => {
       const drag = dragRef.current
       if (!drag) return
@@ -326,6 +368,7 @@ export default function useWorksheetController() {
       window.removeEventListener('pointercancel', onUp)
     }
   })
+  // Saves the current worksheet or design to the workspace library.
   function save(kind) {
     if (!title.trim()) { setError('Give your worksheet a title before saving.'); return }
     if (publish && /\b(fuck|shit|bitch|asshole)\b/i.test(`${title} ${design.tags}`)) { setError('Please use classroom-appropriate titles and keywords.'); return }
@@ -349,6 +392,7 @@ export default function useWorksheetController() {
       toast(`${kind} saved${publish ? ' and published to the catalog' : ' to your library'}.`)
     })
   }
+  // Removes an item from the current library.
   function remove(id) {
     return runStorageAction(async () => {
       if (profile) {
@@ -360,6 +404,7 @@ export default function useWorksheetController() {
     }, toast)
   }
   const catalog = [...published, ...legacyPublicItems, ...examples].filter(item => `${item.name} ${item.tags} ${item.grade}`.toLowerCase().includes(search.toLowerCase()) && (grade === 'All grades' || item.grade === grade) && (tab === 'Worksheets' ? item.kind !== 'Problem design' : item.kind !== 'Worksheet')).sort((a,b) => sort === 'popular' ? b.popularity-a.popularity : a.name.localeCompare(b.name))
+  // Signs in or registers an account and loads its workspace.
   function authenticate(form, register) {
     const body = Object.fromEntries(new FormData(form))
     return runStorageAction(async () => {
@@ -368,6 +413,7 @@ export default function useWorksheetController() {
       toast(register ? 'Your account is ready.' : 'Signed in.')
     })
   }
+  // Ends the current session and returns to the guest workspace.
   function signOut() {
     return runStorageAction(async () => {
       setWorkspace(await accountRequest('logout', { method: 'POST' }))
@@ -380,6 +426,7 @@ export default function useWorksheetController() {
       toast('Signed out.')
     })
   }
+  // Copies eligible browser-saved items into the signed-in library.
   function importBrowserWork() {
     return runStorageAction(async () => {
       for (const item of importable) {
@@ -388,11 +435,12 @@ export default function useWorksheetController() {
       toast('Browser work copied to your private library.')
     })
   }
+  // Removes a canvas object and clears its selection when needed.
   function removeCanvasItem(id) {
     updateElements(canvasItems.filter(item => item.id !== id))
     if (selectedObject === id) setSelectedObject('')
   }
   return {
-    page, design, setDesign, title, setTitle, count, setCount, problems, answerKey: answers ? worksheet.answerKey : null, selectedObject, selectCanvasItem: setSelectedObject, dragPreview, canvasRef, canvasItems, setExpression, addOperand, addOperator, answers, setAnswers, saved, profile, modal, setModal, notice, search, setSearch, grade, setGrade, sort, setSort, tab, setTab, error, setError, publish, setPublish, step, setStep, help, setHelp, toast, navigate, useTemplate, updateOperandSettings, generateFromCanvas, changeOperand, beginCanvasDrag, beginPaletteDrag, updateSelectedObject, resizeAnswerObject, save, remove, catalog, authenticate, signOut, openAccount, importBrowserWork, importableCount: importable.length, busy: busy || loading, removeCanvasItem
+    page, design, setDesign, title, setTitle, count, setCount, problems, answerKey: answers ? worksheet.answerKey : null, selectedObject, selectCanvasItem: setSelectedObject, dragPreview, canvasRef, canvasItems, setExpression, addOperand, addOperator, answers, setAnswers, saved, profile, modal, setModal, notice, search, setSearch, grade, setGrade, sort, setSort, tab, setTab, error, setError, publish, setPublish, step, setStep, help, setHelp, toast, navigate, useTemplate, renameOperand, updateOperandSettings, generateFromCanvas, changeOperand, beginCanvasDrag, beginPaletteDrag, updateSelectedObject, resizeAnswerObject, save, remove, catalog, authenticate, signOut, openAccount, importBrowserWork, importableCount: importable.length, busy: busy || loading, removeCanvasItem
   }
 }

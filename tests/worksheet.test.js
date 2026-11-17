@@ -3,6 +3,7 @@ import test from 'node:test'
 import { Operand, OperandConstraint, Operator, ProblemElement } from '../src/models/problemElements.js'
 import { AnswerKey, ProblemInstance, ProblemTemplate, Worksheet, initialDesign, solveExpression } from '../src/models/worksheet.js'
 
+// Creates a test template with fixed operands and an addition rule.
 function fixedAddition(operandCount) {
   let template = new ProblemTemplate()
   for (let index = 2; index < operandCount; index++) template = template.appendOperand(template.canvasWidth || 700)
@@ -80,4 +81,21 @@ test('expression parsing distinguishes adjacent operands from multi-letter label
   assert.equal(solveExpression('2 ^ 3 ^ 2', {}), 512)
   assert.throws(() => solveExpression('A B + AB', { A: 1, B: 2, AB: 3 }), /operator between operands/)
   assert.throws(() => Worksheet.generate(new ProblemTemplate().appendOperand(700).with({ rule: 'A + B' }), 6), /missing C/)
+})
+
+test('renaming a worksheet operand preserves its identity, values, and answer', () => {
+  const template = new ProblemTemplate().renameOperand('operand-b', 'AB').with({ rule: 'a + AB + a' })
+  const sheet = Worksheet.generate(template, 6).changeOperand(0, 'A', 11)
+  const renamed = sheet.renameOperand('operand-a', ' total1 ')
+  assert.equal(renamed.template.rule, 'TOTAL1 + AB + TOTAL1')
+  assert.equal(renamed.template.canvasItems[0].id, 'operand-a')
+  assert.equal(renamed.template.canvasItems[0].constraint.min, template.canvasItems[0].constraint.min)
+  assert.equal(renamed.problems[0].layout.items[0].value, 'TOTAL1')
+  assert.equal(renamed.problems[0].values.TOTAL1, 11)
+  assert.equal(Object.hasOwn(renamed.problems[0].values, 'A'), false)
+  assert.equal(renamed.problems[0].solve(), sheet.problems[0].solve())
+  const saved = JSON.parse(JSON.stringify(renamed.toItem({ title: 'Custom IDs', kind: 'Worksheet' })))
+  assert.equal(Worksheet.fromItem(saved).problems[0].values.TOTAL1, 11)
+  assert.throws(() => sheet.renameOperand('operand-a', 'ab'), /already in use/)
+  assert.throws(() => sheet.renameOperand('operand-a', '1 total'), /Start with a letter/)
 })
