@@ -218,56 +218,62 @@ export default function useWorksheetController() {
   useEffect(() => {
     const id = revealElement.current
     const canvas = canvasRef.current
-    if (!id || !canvas) return
-    revealElement.current = null
-    const item = [...canvas.querySelectorAll('[data-canvas-id]')].find(node => node.dataset.canvasId === id)
-    if (!item) return
-    const viewport = canvas.parentElement
-    const visible = viewport.getBoundingClientRect()
-    const element = item.getBoundingClientRect()
-    if (element.left < visible.left) viewport.scrollLeft += element.left - visible.left - 12
-    if (element.right > visible.right) viewport.scrollLeft += element.right - visible.right + 12
+    if (id && canvas) {
+      revealElement.current = null
+      const item = [...canvas.querySelectorAll('[data-canvas-id]')].find(node => node.dataset.canvasId === id)
+      if (item) {
+        const viewport = canvas.parentElement
+        const visible = viewport.getBoundingClientRect()
+        const element = item.getBoundingClientRect()
+        if (element.left < visible.left) viewport.scrollLeft += element.left - visible.left - 12
+        if (element.right > visible.right) viewport.scrollLeft += element.right - visible.right + 12
+      }
+    }
   }, [design])
   // Checks the drop position and applies a valid canvas change.
   function commitCanvasDrop(payload, clientX, clientY) {
     const canvas = canvasRef.current
-    if (!canvas) return
-    const bounds = canvas.getBoundingClientRect()
-    const [type, paletteValue] = payload.split(':')
-    const value = type === 'operator' ? '+' : paletteValue
-    const replaced = canvasItems.find(item => item.id === value && type === 'move') ||
-      (type === 'style' && canvasItems.find(item => item.type === 'style'))
-    const nodes = [...canvas.querySelectorAll('[data-canvas-id]')]
-    const existing = replaced && nodes.find(node => node.dataset.canvasId === replaced.id)
-    const width = existing?.offsetWidth || ({ answer: 120, bar: 160, style: 108, operator: 48 })[type]
-    const height = existing?.offsetHeight || ({ answer: 56, bar: 4, style: 32, operator: 48 })[type]
-    const px = Math.max(width / 2, Math.min(bounds.width - width / 2, clientX - bounds.left))
-    const py = Math.max(height / 2, Math.min(bounds.height - height / 2, clientY - bounds.top))
-    const collision = nodes.some(node => {
-      if (node.dataset.canvasId === replaced?.id) return false
-      const rect = node.getBoundingClientRect()
-      const dx = Math.abs(px - (rect.left - bounds.left + rect.width / 2))
-      const dy = Math.abs(py - (rect.top - bounds.top + rect.height / 2))
-      return dx < (width + rect.width) / 2 - 1 && dy < (height + rect.height) / 2 - 1
-    })
-    if (collision) {
-      setError('That position overlaps another object. Move it to a clear space.')
-      return
+    let id
+    if (canvas) {
+      const bounds = canvas.getBoundingClientRect()
+      const [type, paletteValue] = payload.split(':')
+      const value = type === 'operator' ? '+' : paletteValue
+      const replaced = canvasItems.find(item => item.id === value && type === 'move') ||
+        (type === 'style' && canvasItems.find(item => item.type === 'style'))
+      const nodes = [...canvas.querySelectorAll('[data-canvas-id]')]
+      const existing = replaced && nodes.find(node => node.dataset.canvasId === replaced.id)
+      const width = existing?.offsetWidth || ({ answer: 120, bar: 160, style: 108, operator: 48 })[type]
+      const height = existing?.offsetHeight || ({ answer: 56, bar: 4, style: 32, operator: 48 })[type]
+      const px = Math.max(width / 2, Math.min(bounds.width - width / 2, clientX - bounds.left))
+      const py = Math.max(height / 2, Math.min(bounds.height - height / 2, clientY - bounds.top))
+      const collision = nodes.some(node => {
+        let overlaps = false
+        if (node.dataset.canvasId !== replaced?.id) {
+          const rect = node.getBoundingClientRect()
+          const dx = Math.abs(px - (rect.left - bounds.left + rect.width / 2))
+          const dy = Math.abs(py - (rect.top - bounds.top + rect.height / 2))
+          overlaps = dx < (width + rect.width) / 2 - 1 && dy < (height + rect.height) / 2 - 1
+        }
+        return overlaps
+      })
+      if (collision) {
+        setError('That position overlaps another object. Move it to a clear space.')
+      } else {
+        const position = { x: px / bounds.width * 100, y: py / bounds.height * 100 }
+        id = replaced?.id || crypto.randomUUID()
+        const geometry = { id, value, ...position }
+        let element
+        if (replaced) element = replaced.with(type === 'move' ? position : { ...position, value })
+        else if (type === 'operator') element = new Operator(geometry)
+        else if (type === 'style') element = new StyleItem(geometry)
+        else element = new StyleItem({ ...geometry, type, width, height })
+
+        const items = replaced ? canvasItems.map(item => item.id === id ? element : item) : [...canvasItems, element]
+        const patch = type === 'operator' ? { operator: value } : type === 'style' ? { style: value } : {}
+        updateElements(items, patch)
+        setSelectedObject(id)
+      }
     }
-
-    const position = { x: px / bounds.width * 100, y: py / bounds.height * 100 }
-    const id = replaced?.id || crypto.randomUUID()
-    const geometry = { id, value, ...position }
-    let element
-    if (replaced) element = replaced.with(type === 'move' ? position : { ...position, value })
-    else if (type === 'operator') element = new Operator(geometry)
-    else if (type === 'style') element = new StyleItem(geometry)
-    else element = new StyleItem({ ...geometry, type, width, height })
-
-    const items = replaced ? canvasItems.map(item => item.id === id ? element : item) : [...canvasItems, element]
-    const patch = type === 'operator' ? { operator: value } : type === 'style' ? { style: value } : {}
-    updateElements(items, patch)
-    setSelectedObject(id)
     return id
   }
 
@@ -280,13 +286,13 @@ export default function useWorksheetController() {
     const rightIndex = arithmetic.findIndex((item, index) => item instanceof Operand && arithmetic[index - 1] instanceof Operand)
     if (rightIndex === -1) {
       setError('Add an operand to open another gap, or drag the operator to a clear space on the canvas.')
-      return
+    } else {
+      const left = arithmetic[rightIndex - 1]
+      const right = arithmetic[rightIndex]
+      revealElement.current = commitCanvasDrop('operator',
+        bounds.left + (left.x + right.x) * bounds.width / 200,
+        bounds.top + (left.y + right.y) * bounds.height / 200)
     }
-    const left = arithmetic[rightIndex - 1]
-    const right = arithmetic[rightIndex]
-    revealElement.current = commitCanvasDrop('operator',
-      bounds.left + (left.x + right.x) * bounds.width / 200,
-      bounds.top + (left.y + right.y) * bounds.height / 200)
   }
   // Starts dragging an existing canvas object.
   function beginCanvasDrag(event, item) {
@@ -318,16 +324,22 @@ export default function useWorksheetController() {
     const height = dimension === 'height' ? value : selected.height
     const cx = selected.x * bounds.width / 100, cy = selected.y * bounds.height / 100
     const collision = canvasItems.some(item => {
-      if (item.id === selected.id) return false
-      const otherWidth = ['answer','bar'].includes(item.type) ? item.width : item.type === 'operand' ? 72 : item.type === 'operator' ? 48 : 108
-      const otherHeight = ['answer','bar'].includes(item.type) ? item.height : item.type === 'style' ? 32 : 48
-      const dx = Math.abs(cx - item.x * bounds.width / 100)
-      const dy = Math.abs(cy - item.y * bounds.height / 100)
-      return dx < (width + otherWidth) / 2 - 1 && dy < (height + otherHeight) / 2 - 1
+      let overlaps = false
+      if (item.id !== selected.id) {
+        const otherWidth = ['answer','bar'].includes(item.type) ? item.width : item.type === 'operand' ? 72 : item.type === 'operator' ? 48 : 108
+        const otherHeight = ['answer','bar'].includes(item.type) ? item.height : item.type === 'style' ? 32 : 48
+        const dx = Math.abs(cx - item.x * bounds.width / 100)
+        const dy = Math.abs(cy - item.y * bounds.height / 100)
+        overlaps = dx < (width + otherWidth) / 2 - 1 && dy < (height + otherHeight) / 2 - 1
+      }
+      return overlaps
     })
-    if (collision) { setError('That answer box size overlaps another object. Make it smaller or move it.'); return }
-    setTemplate(current => current.with({ canvasItems: current.canvasItems.map(item => item.id === selected.id ? item.with({ [dimension]: value }) : item) }))
-    setError('')
+    if (collision) {
+      setError('That answer box size overlaps another object. Make it smaller or move it.')
+    } else {
+      setTemplate(current => current.with({ canvasItems: current.canvasItems.map(item => item.id === selected.id ? item.with({ [dimension]: value }) : item) }))
+      setError('')
+    }
   }
   // Registers pointer listeners for canvas and palette dragging.
   useEffect(() => {
@@ -368,27 +380,34 @@ export default function useWorksheetController() {
   })
   // Saves the current worksheet or design to the workspace library.
   function save(kind) {
-    if (!title.trim()) { setError('Give your worksheet a title before saving.'); return }
-    if (publish && /\b(fuck|shit|bitch|asshole)\b/i.test(`${title} ${design.tags}`)) { setError('Please use classroom-appropriate titles and keywords.'); return }
     let item
-    try {
-      const next = worksheet.template === design && problems.length === count ? worksheet : generateWorksheet()
-      item = next.toItem({ title: title.trim(), kind })
-    } catch (error) {
-      setError(error.message)
-      return
-    }
-    return runStorageAction(async () => {
-      if (profile) {
-        setWorkspace(await accountRequest('library', { method: 'POST', body: { item, publish } }))
-      } else {
-        if (publish) throw new Error('Sign in to publish to the catalog.')
-        updateGuestLibrary([item, ...guestItems])
+    if (!title.trim()) {
+      setError('Give your worksheet a title before saving.')
+    } else if (publish && /\b(fuck|shit|bitch|asshole)\b/i.test(`${title} ${design.tags}`)) {
+      setError('Please use classroom-appropriate titles and keywords.')
+    } else {
+      try {
+        const next = worksheet.template === design && problems.length === count ? worksheet : generateWorksheet()
+        item = next.toItem({ title: title.trim(), kind })
+      } catch (error) {
+        setError(error.message)
       }
-      setModal(null)
-      setPublish(false)
-      toast(`${kind} saved${publish ? ' and published to the catalog' : ' to your library'}.`)
-    })
+    }
+    let saveRequest
+    if (item) {
+      saveRequest = runStorageAction(async () => {
+        if (profile) {
+          setWorkspace(await accountRequest('library', { method: 'POST', body: { item, publish } }))
+        } else {
+          if (publish) throw new Error('Sign in to publish to the catalog.')
+          updateGuestLibrary([item, ...guestItems])
+        }
+        setModal(null)
+        setPublish(false)
+        toast(`${kind} saved${publish ? ' and published to the catalog' : ' to your library'}.`)
+      })
+    }
+    return saveRequest
   }
   // Removes an item from the current library.
   function remove(id) {

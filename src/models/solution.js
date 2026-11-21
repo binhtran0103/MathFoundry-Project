@@ -37,24 +37,30 @@ export class SolutionSolver extends AnswerKey {
     // Reads a number, operand, unary sign, or parenthesized expression.
     function atom() {
       const token = tokens[index++]
+      let value
       if (token === '(') {
-        const result = expression()
+        value = expression()
         if (tokens[index++] !== ')') throw new Error('Check solution parentheses.')
-        return result
+      } else if (token === '-' || token === '+') {
+        value = token === '-' ? -atom() : atom()
+      } else if (token && Object.hasOwn(operands, token)) {
+        value = Number(operands[token])
+      } else if (token && /^\d/.test(token)) {
+        value = Number(token)
+      } else {
+        throw new Error('Complete the solution expression.')
       }
-      if (token === '-') return -atom()
-      if (token === '+') return atom()
-      if (token && Object.hasOwn(operands, token)) return Number(operands[token])
-      if (token && /^\d/.test(token)) return Number(token)
-      throw new Error('Complete the solution expression.')
+      return value
     }
 
     // Evaluates exponentiation from right to left.
     function power() {
-      const base = atom()
-      if (tokens[index] !== '^') return base
-      index++
-      return Operator.execute('^', base, power())
+      let value = atom()
+      if (tokens[index] === '^') {
+        index++
+        value = Operator.execute('^', value, power())
+      }
+      return value
     }
 
     // Evaluates multiplication and division.

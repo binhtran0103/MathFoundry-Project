@@ -59,12 +59,41 @@ export default function ProblemEditorView({ controller }) {
   // Shows the settings for the selected canvas object.
   function renderSelectedObjectSettings() {
     const item = canvasItems.find(object => object.id === selectedObject)
-    if (!item) return <p className="selection-hint">Select one canvas object to edit its settings.</p>
-    if (item.type === 'operand') return renderOperandSettings(item)
-    if (item.type === 'operator') return <label>Operator<select value={item.value} onChange={e => updateSelectedObject(e.target.value)}>{Object.entries(symbols).map(([operator,symbol]) => <option key={operator} value={operator}>{symbol}</option>)}</select></label>
-    if (item.type === 'answer') return <><p className="selection-hint">This box becomes blank writing space on the worksheet.</p><div className="input-row"><label>Width<input aria-label="Answer space width" type="number" min="40" max="600" value={item.width} onChange={e => resizeAnswerObject('width',e.target.value)}/></label><label>Height<input aria-label="Answer space height" type="number" min="40" max="400" value={item.height} onChange={e => resizeAnswerObject('height',e.target.value)}/></label></div></>
-    if (item.type === 'bar') return <><p className="selection-hint">A visual divider only; it does not affect the expression.</p><label>Bar width<input aria-label="Divider width" type="number" min="40" max="600" value={item.width} onChange={e => resizeAnswerObject('width',e.target.value)}/></label></>
-    return <label>Display style<select value={item.value} onChange={e => updateSelectedObject(e.target.value)}>{[['horizontal','Horizontal'],['vertical','Stacked'],['division','Long division'],['radical','Radical']].map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+    let settings
+    if (!item) {
+      settings = <p className="selection-hint">Select one canvas object to edit its settings.</p>
+    } else if (item.type === 'operand') {
+      settings = renderOperandSettings(item)
+    } else if (item.type === 'operator') {
+      settings = <label>Operator
+        <select value={item.value} onChange={e => updateSelectedObject(e.target.value)}>
+          {Object.entries(symbols).map(([operator, symbol]) => <option key={operator} value={operator}>{symbol}</option>)}
+        </select>
+      </label>
+    } else if (item.type === 'answer') {
+      settings = <>
+        <p className="selection-hint">This box becomes blank writing space on the worksheet.</p>
+        <div className="input-row">
+          <label>Width<input aria-label="Answer space width" type="number" min="40" max="600" value={item.width} onChange={e => resizeAnswerObject('width', e.target.value)}/></label>
+          <label>Height<input aria-label="Answer space height" type="number" min="40" max="400" value={item.height} onChange={e => resizeAnswerObject('height', e.target.value)}/></label>
+        </div>
+      </>
+    } else if (item.type === 'bar') {
+      settings = <>
+        <p className="selection-hint">A visual divider only; it does not affect the expression.</p>
+        <label>Bar width<input aria-label="Divider width" type="number" min="40" max="600" value={item.width} onChange={e => resizeAnswerObject('width', e.target.value)}/></label>
+      </>
+    } else {
+      settings = <label>Display style
+        <select value={item.value} onChange={e => updateSelectedObject(e.target.value)}>
+          {[
+            ['horizontal', 'Horizontal'], ['vertical', 'Stacked'],
+            ['division', 'Long division'], ['radical', 'Radical'],
+          ].map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </select>
+      </label>
+    }
+    return settings
   }
 
   return <>

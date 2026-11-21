@@ -81,20 +81,24 @@ export function openWorkspaceStore(path) {
     // Creates a session and, for registration, inserts the account in the same transaction.
     startSession(profile, credentials, tokenHash, previousTokenHash, now, expiresAt) {
       db.exec('BEGIN IMMEDIATE')
+      let started
       try {
-        if (credentials && !insertUser.run(profile.id, profile.name, profile.email, credentials.salt, credentials.passwordHash).changes) {
+        started = !credentials || Boolean(insertUser.run(
+          profile.id, profile.name, profile.email, credentials.salt, credentials.passwordHash,
+        ).changes)
+        if (started) {
+          deleteExpired.run(now)
+          if (previousTokenHash) deleteSession.run(previousTokenHash)
+          insertSession.run(tokenHash, profile.id, expiresAt)
+          db.exec('COMMIT')
+        } else {
           db.exec('ROLLBACK')
-          return false
         }
-        deleteExpired.run(now)
-        if (previousTokenHash) deleteSession.run(previousTokenHash)
-        insertSession.run(tokenHash, profile.id, expiresAt)
-        db.exec('COMMIT')
-        return true
       } catch (error) {
         db.exec('ROLLBACK')
         throw error
       }
+      return started
     },
     // Ends the session for the supplied token hash.
     deleteSession: tokenHash => deleteSession.run(tokenHash),

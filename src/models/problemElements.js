@@ -49,18 +49,23 @@ export class OperandConstraint {
 
   // Returns a fixed value or draws a valid random multiple.
   draw(previous) {
-    if (this.mode === 'fixed') return Number(this.value)
-    const min = Number(this.min)
-    const max = Number(this.max)
-    const step = Number(this.multiple)
-    const first = Math.ceil(min / step)
-    const count = Math.floor(max / step) - first + 1
-    if (!Number.isFinite(min) || !Number.isFinite(max) || !Number.isFinite(step) || step < 1 || count < 1) {
-      throw new Error('Choose a valid range containing at least one multiple.')
+    let value
+    if (this.mode === 'fixed') {
+      value = Number(this.value)
+    } else {
+      const min = Number(this.min)
+      const max = Number(this.max)
+      const step = Number(this.multiple)
+      const first = Math.ceil(min / step)
+      const count = Math.floor(max / step) - first + 1
+      if (!Number.isFinite(min) || !Number.isFinite(max) || !Number.isFinite(step) || step < 1 || count < 1) {
+        throw new Error('Choose a valid range containing at least one multiple.')
+      }
+      const index = Math.floor(Math.random() * count)
+      value = (first + index) * step
+      if (count > 1 && value === previous) value = (first + (index + 1) % count) * step
     }
-    const index = Math.floor(Math.random() * count)
-    const value = (first + index) * step
-    return count > 1 && value === previous ? (first + (index + 1) % count) * step : value
+    return value
   }
 }
 
@@ -110,7 +115,6 @@ export class StyleItem extends ProblemElement {
 
   // Returns the label for the presentation item.
   get label() {
-    if (this.type === 'bar') return '—'
-    return this.value
+    return this.type === 'bar' ? '—' : this.value
   }
 }

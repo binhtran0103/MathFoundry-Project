@@ -108,19 +108,21 @@ function validateItem(item) {
 
 // Checks the settings for legacy and current problem designs.
 function validDesign(design) {
+  let valid = false
   if (design.version !== 2) {
-    return validOperand(design.a) && validOperand(design.b) &&
+    valid = validOperand(design.a) && validOperand(design.b) &&
       (design.operands == null || Object.values(design.operands).every(validOperand))
+  } else if (Array.isArray(design.canvasItems) && validDimension(design.canvasWidth) &&
+      typeof design.expressionEdited === 'boolean' &&
+      (design.nextOperandNumber == null ||
+        (Number.isSafeInteger(design.nextOperandNumber) && design.nextOperandNumber >= 1))) {
+    const operands = design.canvasItems.filter(item => item.type === 'operand')
+    valid = operands.length >= 2 &&
+      operands.every(item => /^[A-Z][A-Z0-9]*$/.test(item.value) && validOperand(item.constraint)) &&
+      new Set(operands.map(item => item.value)).size === operands.length &&
+      new Set(design.canvasItems.map(item => item.id)).size === design.canvasItems.length
   }
-  if (!Array.isArray(design.canvasItems) || !validDimension(design.canvasWidth) ||
-      typeof design.expressionEdited !== 'boolean') return false
-  if (design.nextOperandNumber != null &&
-      (!Number.isSafeInteger(design.nextOperandNumber) || design.nextOperandNumber < 1)) return false
-  const operands = design.canvasItems.filter(item => item.type === 'operand')
-  return operands.length >= 2 &&
-    operands.every(item => /^[A-Z][A-Z0-9]*$/.test(item.value) && validOperand(item.constraint)) &&
-    new Set(operands.map(item => item.value)).size === operands.length &&
-    new Set(design.canvasItems.map(item => item.id)).size === design.canvasItems.length
+  return valid
 }
 
 // Checks the shape of an operand's generation settings.
@@ -153,13 +155,16 @@ function validLayout(layout) {
 
 // Checks the saved fields for an individual problem.
 function validProblem(problem) {
-  if (!problem || typeof problem !== 'object') return false
-  const { a, b, answer, expression, layout, values } = problem
-  return (answer == null || Number.isFinite(answer)) &&
-    (a == null || Number.isFinite(a)) && (b == null || Number.isFinite(b)) &&
-    (expression == null || typeof expression === 'string') &&
-    (layout == null || validLayout(layout)) &&
-    (values == null || Object.values(values).every(value => value == null || Number.isFinite(value)))
+  let valid = false
+  if (problem && typeof problem === 'object') {
+    const { a, b, answer, expression, layout, values } = problem
+    valid = (answer == null || Number.isFinite(answer)) &&
+      (a == null || Number.isFinite(a)) && (b == null || Number.isFinite(b)) &&
+      (expression == null || typeof expression === 'string') &&
+      (layout == null || validLayout(layout)) &&
+      (values == null || Object.values(values).every(value => value == null || Number.isFinite(value)))
+  }
+  return valid
 }
 
 // Creates the workspace API and opens its database.
@@ -202,8 +207,8 @@ export function createApi(path, { origin, secureCookies = false } = {}) {
     const tokenHash = token ? hashToken(token) : null
     const user = store.getUser(tokenHash, Date.now())
 
-    if (method === 'GET' && pathname === '/api/workspace') return send(response, 200, workspace(user))
-
+    let status = 200
+    let responseUser = user
     const register = pathname === '/api/register'
     if (method === 'POST' && (register || pathname === '/api/login')) {
       checkAuthLimit(request)
@@ -222,40 +227,39 @@ export function createApi(path, { origin, secureCookies = false } = {}) {
         throw new RequestError(409, 'An account with this email already exists.')
       }
       setSessionCookie(response, newToken, sessionSeconds, secureCookies)
-      return send(response, register ? 201 : 200, workspace(profile))
-    }
+      status = register ? 201 : 200
+      responseUser = profile
+    } else if (method !== 'GET' || pathname !== '/api/workspace') {
+      const itemId = pathname.startsWith('/api/library/') ? pathname.slice('/api/library/'.length) : ''
+      if (!(method === 'POST' && ['/api/logout', '/api/library'].includes(pathname)) &&
+          !(method === 'DELETE' && itemIdPattern.test(itemId))) {
+        throw new RequestError(404, 'This endpoint does not exist.')
+      }
+      if (!user) throw new RequestError(401, 'Sign in to access your library.')
+      if (headers['x-mathfoundry-account'] !== user.id) {
+        throw new RequestError(409, 'Your account changed. Reload the page to continue.')
+      }
 
-    const itemId = pathname.startsWith('/api/library/') ? pathname.slice('/api/library/'.length) : ''
-    if (!(method === 'POST' && ['/api/logout', '/api/library'].includes(pathname)) &&
-        !(method === 'DELETE' && itemIdPattern.test(itemId))) {
-      throw new RequestError(404, 'This endpoint does not exist.')
+      if (pathname === '/api/logout') {
+        store.deleteSession(tokenHash)
+        setSessionCookie(response, '', 0, secureCookies)
+        responseUser = null
+      } else if (method === 'DELETE') {
+        store.removeItem(user.id, itemId)
+      } else {
+        const { item, publish } = await readJson(request)
+        validateItem(item)
+        if (!store.getUser(tokenHash, Date.now())) throw new RequestError(401, 'Sign in again to save your work.')
+        if (publish === true && /\b(fuck|shit|bitch|asshole)\b/i.test(`${item.title} ${item.tags}`)) {
+          throw new RequestError(400, 'Please use classroom-appropriate titles and keywords.')
+        }
+        if (!store.saveItem(user.id, item, publish === true, Date.now())) {
+          const kind = item.kind === 'Worksheet' ? 'worksheets' : 'problem templates'
+          throw new RequestError(409, `Your account has reached the storage limit for ${kind}. Delete a private item of the same type to free a slot.`)
+        }
+      }
     }
-    if (!user) throw new RequestError(401, 'Sign in to access your library.')
-    if (headers['x-mathfoundry-account'] !== user.id) {
-      throw new RequestError(409, 'Your account changed. Reload the page to continue.')
-    }
-
-    if (pathname === '/api/logout') {
-      store.deleteSession(tokenHash)
-      setSessionCookie(response, '', 0, secureCookies)
-      return send(response, 200, workspace(null))
-    }
-    if (method === 'DELETE') {
-      store.removeItem(user.id, itemId)
-      return send(response, 200, workspace(user))
-    }
-
-    const { item, publish } = await readJson(request)
-    validateItem(item)
-    if (!store.getUser(tokenHash, Date.now())) throw new RequestError(401, 'Sign in again to save your work.')
-    if (publish === true && /\b(fuck|shit|bitch|asshole)\b/i.test(`${item.title} ${item.tags}`)) {
-      throw new RequestError(400, 'Please use classroom-appropriate titles and keywords.')
-    }
-    if (!store.saveItem(user.id, item, publish === true, Date.now())) {
-      const kind = item.kind === 'Worksheet' ? 'worksheets' : 'problem templates'
-      throw new RequestError(409, `Your account has reached the storage limit for ${kind}. Delete a private item of the same type to free a slot.`)
-    }
-    return send(response, 200, workspace(user))
+    return send(response, status, workspace(responseUser))
   }
 
   return {

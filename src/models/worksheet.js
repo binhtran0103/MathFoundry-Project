@@ -18,9 +18,13 @@ export const initialDesign = {
 // Looks up an operand's generation settings in current or legacy design data.
 export function operandSettings(design, name) {
   const constraint = design.canvasItems?.find(item => item.type === 'operand' && item.value === name)?.constraint
-  if (constraint) return constraint
-  if (design.operands && Object.hasOwn(design.operands, name)) return design.operands[name]
-  return name === 'B' ? design.b || design.a : design.a
+  let settings = constraint
+  if (!settings) {
+    settings = design.operands && Object.hasOwn(design.operands, name)
+      ? design.operands[name]
+      : (name === 'B' && design.b) || design.a
+  }
+  return settings
 }
 
 // Creates the starting canvas elements for an operator.
@@ -34,9 +38,15 @@ function defaultElements(operator) {
 
 // Restores a saved canvas item as its corresponding model.
 function makeElement(item, design) {
-  if (item.type === 'operand') return new Operand({ ...item, constraint: item.constraint || operandSettings(design, item.value) })
-  if (item.type === 'operator') return new Operator(item)
-  return new StyleItem(item)
+  let element
+  if (item.type === 'operand') {
+    element = new Operand({ ...item, constraint: item.constraint || operandSettings(design, item.value) })
+  } else if (item.type === 'operator') {
+    element = new Operator(item)
+  } else {
+    element = new StyleItem(item)
+  }
+  return element
 }
 
 // Converts an operand position into an alphabetical label.
@@ -87,14 +97,17 @@ export class ProblemTemplate {
     const name = input.trim()
     if (!/^[A-Z][A-Z0-9]*$/i.test(name)) throw new Error('Start with a letter and use only letters and digits.')
     const next = name.toUpperCase()
-    if (next === operand.value) return this
-    if (this.canvasItems.some(item => item instanceof Operand && item.value === next)) {
-      throw new Error('That operand ID is already in use.')
+    let template = this
+    if (next !== operand.value) {
+      if (this.canvasItems.some(item => item instanceof Operand && item.value === next)) {
+        throw new Error('That operand ID is already in use.')
+      }
+      template = this.with({
+        canvasItems: this.canvasItems.map(item => item === operand ? operand.with({ value: next }) : item),
+        rule: SolutionSolver.renameOperand(this.rule, operand.value, next),
+      })
     }
-    return this.with({
-      canvasItems: this.canvasItems.map(item => item === operand ? operand.with({ value: next }) : item),
-      rule: SolutionSolver.renameOperand(this.rule, operand.value, next),
-    })
+    return template
   }
 
   // Adds an operand with an unused label and expands the canvas if needed.
@@ -215,9 +228,14 @@ export class Worksheet {
   static fromItem(item) {
     const template = item.design ? new ProblemTemplate(item.design) : ProblemTemplate.fromCatalog(item)
     const layout = Array.isArray(item.layout) ? item.layout : { ...template.layout(), ...item.layout }
-    if (!item.problems) return Worksheet.generate(template, item.count, layout)
-    const problems = item.problems.map(problem => new ProblemInstance(problem, template.rule, layout))
-    return new Worksheet(template, problems, layout)
+    let worksheet
+    if (item.problems) {
+      const problems = item.problems.map(problem => new ProblemInstance(problem, template.rule, layout))
+      worksheet = new Worksheet(template, problems, layout)
+    } else {
+      worksheet = Worksheet.generate(template, item.count, layout)
+    }
+    return worksheet
   }
 
   // Builds the answer key from the worksheet's problems.
@@ -244,32 +262,35 @@ export class Worksheet {
   // Updates the operand label across the template, problems, and layouts.
   renameOperand(id, input) {
     const template = this.template.renameOperand(id, input)
-    if (template === this.template) return this
-    const previous = this.template.canvasItems.find(item => item.id === id).value
-    const next = template.canvasItems.find(item => item.id === id).value
-    const layouts = new Map()
-    // Updates an operand label in a layout and reuses the result for shared layouts.
-    const renameLayout = layout => {
-      if (layouts.has(layout)) return layouts.get(layout)
-      const items = Array.isArray(layout) ? layout : layout.items
-      const renamed = items === this.template.canvasItems ? template.canvasItems : items?.map(item =>
-        item.type === 'operand' && item.value === previous ? { ...item, value: next } : item)
-      const result = Array.isArray(layout) ? renamed : { ...layout, items: renamed }
-      layouts.set(layout, result)
-      return result
-    }
-    const problems = this.problems.map(problem => {
-      const values = { ...problem.values }
-      if (Object.hasOwn(values, previous)) {
-        values[next] = values[previous]
-        delete values[previous]
+    let worksheet = this
+    if (template !== this.template) {
+      const previous = this.template.canvasItems.find(item => item.id === id).value
+      const next = template.canvasItems.find(item => item.id === id).value
+      const layouts = new Map()
+      // Updates an operand label in a layout and reuses the result for shared layouts.
+      const renameLayout = layout => {
+        if (!layouts.has(layout)) {
+          const items = Array.isArray(layout) ? layout : layout.items
+          const renamed = items === this.template.canvasItems ? template.canvasItems : items?.map(item =>
+            item.type === 'operand' && item.value === previous ? { ...item, value: next } : item)
+          layouts.set(layout, Array.isArray(layout) ? renamed : { ...layout, items: renamed })
+        }
+        return layouts.get(layout)
       }
-      return new ProblemInstance({
-        ...problem, values, layout: renameLayout(problem.layout),
-        expression: SolutionSolver.renameOperand(problem.expression, previous, next),
+      const problems = this.problems.map(problem => {
+        const values = { ...problem.values }
+        if (Object.hasOwn(values, previous)) {
+          values[next] = values[previous]
+          delete values[previous]
+        }
+        return new ProblemInstance({
+          ...problem, values, layout: renameLayout(problem.layout),
+          expression: SolutionSolver.renameOperand(problem.expression, previous, next),
+        })
       })
-    })
-    return new Worksheet(template, problems, renameLayout(this.layout))
+      worksheet = new Worksheet(template, problems, renameLayout(this.layout))
+    }
+    return worksheet
   }
 
   // Validates the problems and builds a record for the library.
