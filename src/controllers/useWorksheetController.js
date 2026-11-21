@@ -6,12 +6,19 @@ import { examples } from '../models/catalog.js'
 import { read, write } from '../models/storage.js'
 import { workspaceRequest } from '../models/workspaceApi.js'
 
+const temporaryDesignKey = 'temporary'
+const savedDesignKey = id => `saved:${id}`
+
 // Manages worksheet editing, navigation, and workspace actions.
 export default function useWorksheetController() {
   const [page, setPage] = useState('Overview')
   const [worksheet, setWorksheet] = useState(() => Worksheet.generate(new ProblemTemplate(), 12))
   const [design, setTemplate] = useState(worksheet.template)
   const [title, setTitle] = useState(worksheet.template.name)
+  const [designTitle, setDesignTitle] = useState(worksheet.template.name)
+  const [editorSavedDesign, setEditorSavedDesign] = useState(null)
+  const [temporaryDesign, setTemporaryDesign] = useState(null)
+  const [worksheetDesignKey, setWorksheetDesignKey] = useState('')
   const [count, setCount] = useState(12)
   const [selectedObject, setSelectedObject] = useState('operand-a')
   const [dragPreview, setDragPreview] = useState(null)
@@ -30,6 +37,9 @@ export default function useWorksheetController() {
   const { published } = workspace
   const profile = workspace.profile ? new User(workspace.profile, workspace.saved) : null
   const saved = profile?.library ?? guestItems
+  const savedDesigns = saved.filter(item => item.kind === 'Problem design')
+  const selectedSavedDesign = savedDesigns.find(item => savedDesignKey(item.id) === worksheetDesignKey)
+  const worksheetDesignSelection = (selectedSavedDesign || worksheetDesignKey === temporaryDesignKey) ? worksheetDesignKey : ''
   const importable = profile?.browserWorkToImport(guestItems) ?? []
   const [modal, setModal] = useState(null)
   const [notice, setNotice] = useState('')
@@ -39,7 +49,6 @@ export default function useWorksheetController() {
   const [tab, setTab] = useState('Worksheets')
   const [error, setError] = useState('')
   const [publish, setPublish] = useState(false)
-  const [step, setActiveStep] = useState('design')
   const [help, setHelp] = useState(false)
   // Shows a temporary notice.
   function toast(message) { setNotice(message); window.setTimeout(() => setNotice(''), 4500) }
@@ -92,10 +101,13 @@ export default function useWorksheetController() {
   // Switches pages and clears the current error and search.
   function navigate(next) { setPage(next); setError(''); setSearch('') }
   // Loads a worksheet and resets the editor selection and answer display.
-  function openWorksheet(next, nextTitle) {
+  function openWorksheet(next, nextTitle, savedDesign) {
     setWorksheet(next)
     setTemplate(next.template)
     setTitle(nextTitle)
+    setDesignTitle(nextTitle)
+    setEditorSavedDesign(savedDesign ? { id: savedDesign.id, template: next.template, title: nextTitle } : null)
+    setWorksheetDesignKey(savedDesign ? savedDesignKey(savedDesign.id) : '')
     setCount(next.problems.length)
     setSelectedObject(next.template.canvasItems.find(item => item instanceof Operand)?.id || '')
     setShowAnswers(false)
@@ -105,8 +117,7 @@ export default function useWorksheetController() {
   function useTemplate(item) {
     try {
       const next = profile?.openSavedWork(item.id) || Worksheet.fromItem(item)
-      openWorksheet(next, item.title || item.name)
-      setActiveStep('worksheet')
+      openWorksheet(next, item.title || item.name, savedDesigns.find(entry => entry.id === item.id))
       navigate('Create worksheet')
     } catch (error) {
       setError(error.message)
@@ -120,22 +131,14 @@ export default function useWorksheetController() {
     setError('')
   }
 
-  // Applies design changes to the editor and the matching worksheet.
-  function setDesign(patch) {
-    const next = design.with(patch)
-    setTemplate(next)
-    if (worksheet.template === design) setWorksheet(worksheet.withPresentation(next))
+  // Applies worksheet settings without changing the problem editor.
+  function setWorksheetPresentation(patch) {
+    setWorksheet(current => current.withPresentation(current.template.with(patch)))
   }
 
-  // Renames an operand in the design and its matching worksheet.
+  // Renames an operand in the editor draft.
   function renameOperand(id, input) {
-    if (worksheet.template === design) {
-      const next = worksheet.renameOperand(id, input)
-      setWorksheet(next)
-      setTemplate(next.template)
-    } else {
-      setTemplate(design.renameOperand(id, input))
-    }
+    setTemplate(design.renameOperand(id, input))
     setError('')
   }
 
@@ -147,32 +150,55 @@ export default function useWorksheetController() {
   }
 
   // Generates problems with the current design and canvas dimensions.
-  function generateWorksheet() {
+  function generateEditorWorksheet() {
     const bounds = canvasRef.current?.getBoundingClientRect()
-    const layout = design.layout(bounds?.width || design.canvasWidth || worksheet.layout.canvasWidth,
-      bounds?.height || worksheet.layout.canvasHeight)
+    const layout = design.layout(bounds?.width, bounds?.height)
     return Worksheet.generate(design, count, layout)
   }
 
-  // Generates a worksheet and opens its preview.
-  function generateFromCanvas() {
+  // Selects a saved design or the last design sent from the editor.
+  function selectWorksheetDesign(key) {
+    const item = savedDesigns.find(entry => savedDesignKey(entry.id) === key)
+    const temporary = key === temporaryDesignKey ? temporaryDesign : null
+    if (!item && !temporary) return
     try {
-      setWorksheet(generateWorksheet())
+      const { template, layout } = item ? Worksheet.fromItem(item) : temporary
+      setWorksheet(Worksheet.generate(template, count, layout))
+      setWorksheetDesignKey(key)
       setError('')
-      setActiveStep('worksheet')
+    } catch (error) {
+      setError(error.message)
+    }
+  }
+
+  // Generates problems from the source currently in the worksheet preview.
+  function regenerateWorksheet() {
+    try {
+      setWorksheet(Worksheet.generate(worksheet.template, count, worksheet.layout))
+      setError('')
       toast('Worksheet created from your problem layout.')
     } catch (error) {
       setError(error.message)
     }
   }
 
-  // Switches workshop steps and regenerates the preview when needed.
-  function setStep(next) {
-    if (next === 'worksheet' && (worksheet.template !== design || problems.length !== count)) {
-      generateFromCanvas()
-      return
+  // Sends the editor design to the generator using its saved ID when available.
+  function generateFromCanvas() {
+    try {
+      const savedDesign = editorSavedDesign?.template === design && editorSavedDesign.title === designTitle
+        ? savedDesigns.find(item => item.id === editorSavedDesign.id)
+        : undefined
+      const source = savedDesign && Worksheet.fromItem(savedDesign)
+      const next = source ? Worksheet.generate(source.template, count, source.layout) : generateEditorWorksheet()
+      setWorksheet(next)
+      setTitle(designTitle)
+      setWorksheetDesignKey(savedDesign ? savedDesignKey(savedDesign.id) : temporaryDesignKey)
+      if (!savedDesign) setTemporaryDesign({ template: next.template, layout: next.layout, title: designTitle })
+      navigate('Create worksheet')
+      toast('Worksheet created from your problem layout.')
+    } catch (error) {
+      setError(error.message)
     }
-    setActiveStep(next)
   }
 
   // Edits or rerolls one operand in a worksheet problem.
@@ -380,15 +406,19 @@ export default function useWorksheetController() {
   })
   // Saves the current worksheet or design to the workspace library.
   function save(kind) {
+    const inEditor = page === 'Design a Problem'
+    const workTitle = inEditor ? designTitle : title
+    const template = inEditor ? design : worksheet.template
     let item
-    if (!title.trim()) {
-      setError('Give your worksheet a title before saving.')
-    } else if (publish && /\b(fuck|shit|bitch|asshole)\b/i.test(`${title} ${design.tags}`)) {
+    if (!workTitle.trim()) {
+      setError('Enter a title before saving.')
+    } else if (publish && /\b(fuck|shit|bitch|asshole)\b/i.test(`${workTitle} ${template.tags}`)) {
       setError('Please use classroom-appropriate titles and keywords.')
     } else {
       try {
-        const next = worksheet.template === design && problems.length === count ? worksheet : generateWorksheet()
-        item = next.toItem({ title: title.trim(), kind })
+        const next = inEditor ? generateEditorWorksheet() : problems.length === count
+          ? worksheet : Worksheet.generate(template, count, worksheet.layout)
+        item = next.toItem({ title: workTitle.trim(), kind })
       } catch (error) {
         setError(error.message)
       }
@@ -401,6 +431,9 @@ export default function useWorksheetController() {
         } else {
           if (publish) throw new Error('Sign in to publish to the catalog.')
           updateGuestLibrary([item, ...guestItems])
+        }
+        if (inEditor && kind === 'Problem design') {
+          setEditorSavedDesign({ id: item.id, template: design, title: designTitle })
         }
         setModal(null)
         setPublish(false)
@@ -436,8 +469,8 @@ export default function useWorksheetController() {
       setWorkspace(await accountRequest('logout', { method: 'POST' }))
       const initial = Worksheet.generate(new ProblemTemplate(), 12)
       openWorksheet(initial, initial.template.name)
+      setTemporaryDesign(null)
       setPublish(false)
-      setActiveStep('design')
       setModal(null)
       navigate('Overview')
       toast('Signed out.')
@@ -458,6 +491,11 @@ export default function useWorksheetController() {
     if (selectedObject === id) setSelectedObject('')
   }
   return {
-    page, design, setDesign, title, setTitle, count, setCount, problems, answerKey: answers ? worksheet.answerKey : null, selectedObject, selectCanvasItem: setSelectedObject, dragPreview, canvasRef, canvasItems, setExpression, addOperand, addOperator, answers, setAnswers, saved, profile, modal, setModal, notice, search, setSearch, grade, setGrade, sort, setSort, tab, setTab, error, setError, publish, setPublish, step, setStep, help, setHelp, toast, navigate, useTemplate, renameOperand, updateOperandSettings, generateFromCanvas, changeOperand, beginCanvasDrag, beginPaletteDrag, updateSelectedObject, resizeAnswerObject, save, remove, catalog, authenticate, signOut, openAccount, importBrowserWork, importableCount: importable.length, busy: busy || loading, removeCanvasItem
+    page, design, designTitle, setDesignTitle, title, setTitle, count, setCount, problems,
+    worksheetTemplate: worksheet.template, setWorksheetPresentation, regenerateWorksheet,
+    worksheetDesignSelection, selectWorksheetDesign,
+    savedDesignOptions: savedDesigns.map(item => ({ value: savedDesignKey(item.id), label: item.title || item.name })),
+    temporaryDesignOption: temporaryDesign && { value: temporaryDesignKey, label: temporaryDesign.title.trim() || 'Untitled problem' },
+    answerKey: answers ? worksheet.answerKey : null, selectedObject, selectCanvasItem: setSelectedObject, dragPreview, canvasRef, canvasItems, setExpression, addOperand, addOperator, answers, setAnswers, saved, profile, modal, setModal, notice, search, setSearch, grade, setGrade, sort, setSort, tab, setTab, error, setError, publish, setPublish, help, setHelp, toast, navigate, useTemplate, renameOperand, updateOperandSettings, generateFromCanvas, changeOperand, beginCanvasDrag, beginPaletteDrag, updateSelectedObject, resizeAnswerObject, save, remove, catalog, authenticate, signOut, openAccount, importBrowserWork, importableCount: importable.length, busy: busy || loading, removeCanvasItem
   }
 }

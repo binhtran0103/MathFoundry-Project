@@ -3,13 +3,14 @@ import { symbols, operandSettings } from '../models/worksheet.js'
 
 // Renders the worksheet generation controls and printable preview.
 export default function WorksheetGeneratorView({ controller }) {
-  const { design, setDesign, title, setTitle, count, setCount, problems, answerKey, canvasItems,
-    answers, setAnswers, setStep, generateFromCanvas, changeOperand } = controller
+  const { title, setTitle, count, setCount, problems, answerKey, answers, setAnswers, navigate,
+    worksheetTemplate, setWorksheetPresentation, regenerateWorksheet, changeOperand,
+    worksheetDesignSelection, selectWorksheetDesign, savedDesignOptions, temporaryDesignOption } = controller
 
   // Resolves a problem's display objects and canvas dimensions.
   function getWorksheetScene(problem) {
     const layout = problem.layout
-    const items = Array.isArray(layout) ? layout : layout.items || canvasItems
+    const items = Array.isArray(layout) ? layout : layout.items || worksheetTemplate.canvasItems
     const sourceWidth = Array.isArray(layout) ? 700 : layout.canvasWidth || 700
     const sourceHeight = Array.isArray(layout) ? 420 : layout.canvasHeight || 420
     const objects = items.filter(item => item.type === 'operand' || item.type === 'operator' || item.type === 'answer' || item.type === 'bar').map(item => ({
@@ -34,10 +35,10 @@ export default function WorksheetGeneratorView({ controller }) {
   function renderWorksheetProblem(problem, index) {
     const { objects, minX, minY, sceneWidth, sceneHeight } = worksheetScenes[index]
     const { values } = problem
-    return <div className={`problem ${design.style}`} key={index}><span className="problem-number">{String(index+1).padStart(2,'0')}</span><div className="snapshot-viewport"><div className="problem-layout-snapshot" style={{ '--scene-ratio': `${sceneWidth} / ${sceneHeight}`, fontSize: operandFontSize }}>{objects.map(item => {
+    return <div className={`problem ${worksheetTemplate.style}`} key={index}><span className="problem-number">{String(index+1).padStart(2,'0')}</span><div className="snapshot-viewport"><div className="problem-layout-snapshot" style={{ '--scene-ratio': `${sceneWidth} / ${sceneHeight}`, fontSize: operandFontSize }}>{objects.map(item => {
       const position = { left: `${(item.centerX - minX) / sceneWidth * 100}%`, top: `${(item.centerY - minY) / sceneHeight * 100}%`, width: `${item.sourceWidth / sceneWidth * 100}%`, height: `${item.sourceHeight / sceneHeight * 100}%`, '--token-font-size': `${18 / sceneWidth * 100}cqw` }
       return item.type === 'operand'
-        ? <div key={item.id} className="snapshot-token snapshot-operand" style={position}><input aria-label={`Problem ${index+1} operand ${item.value}`} type="number" value={values[item.value] ?? ''} onChange={e => changeOperand(index,item.value,e.target.value)}/>{operandSettings(design,item.value)?.mode === 'random' && <button title={`Reroll operand ${item.value}`} onClick={() => changeOperand(index,item.value)}><Icon name="refresh" size={11}/></button>}</div>
+        ? <div key={item.id} className="snapshot-token snapshot-operand" style={position}><input aria-label={`Problem ${index+1} operand ${item.value}`} type="number" value={values[item.value] ?? ''} onChange={e => changeOperand(index,item.value,e.target.value)}/>{operandSettings(worksheetTemplate,item.value)?.mode === 'random' && <button title={`Reroll operand ${item.value}`} onClick={() => changeOperand(index,item.value)}><Icon name="refresh" size={11}/></button>}</div>
         : item.type === 'operator'
           ? <span key={item.id} className="snapshot-token snapshot-operator" style={position}><span className="snapshot-operator-glyph">{symbols[item.value] || item.value}</span></span>
           : item.type === 'answer'
@@ -67,11 +68,42 @@ export default function WorksheetGeneratorView({ controller }) {
   return <>
     <section className="settings-panel">
       <div className="panel-heading"><Icon name="pen"/><h2>Worksheet settings</h2></div>
+      <label>
+        Problem design
+        <select value={worksheetDesignSelection} onChange={event => selectWorksheetDesign(event.target.value)}>
+          {!worksheetDesignSelection && <option value="" disabled>Current worksheet design</option>}
+          {temporaryDesignOption && <option value={temporaryDesignOption.value}>{temporaryDesignOption.label} (Temporary)</option>}
+          {savedDesignOptions.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
+        </select>
+        {!savedDesignOptions.length && <small>Save a problem design to add it here.</small>}
+      </label>
       <label>Worksheet title<input value={title} maxLength={80} onChange={e => setTitle(e.target.value)}/></label>
-      <label>Operand font<select value={design.operandFont || 'mono'} onChange={e => setDesign({operandFont:e.target.value})}><option value="mono">Terminal Mono</option><option value="courier">Courier</option><option value="console">Lucida Console</option><option value="serif">Book Serif</option><option value="sans">Clean Sans</option></select></label><div className="input-row"><label>Problems<select value={count} onChange={e => setCount(Number(e.target.value))}>{[6,8,12,16,20,24,30].map(n => <option key={n} value={n}>{n} problems</option>)}</select></label><label>Grade level<select value={design.grade} onChange={e => setDesign({grade:e.target.value})}>{[1,2,3,4,5,6,7,8].map(n => <option key={n}>Grade {n}</option>)}</select></label></div><label>Keywords<input value={design.tags} onChange={e => setDesign({tags:e.target.value})}/></label><button className="secondary full" onClick={generateFromCanvas}><Icon name="refresh" size={17}/>Generate fresh problems</button><div className="toggle-row"><div><strong>Answer key</strong><small>Include solutions on the sheet</small></div><button role="switch" aria-checked={answers} aria-label="Show answer key" className={`toggle ${answers ? 'on' : ''}`} onClick={() => setAnswers(!answers)}><span/></button></div><div className="instruction"><span>✦</span><p>Click a number to edit it. Use its refresh arrow to reroll just that operand.</p></div><button className="primary full" onClick={() => window.print()}><Icon name="print" size={17}/>Print / Save as PDF</button><button className="text-button full" onClick={() => setStep('design')}>Edit problem design <Icon name="arrow" size={16}/></button>
+      <label>
+        Operand font
+        <select value={worksheetTemplate.operandFont || 'mono'} onChange={event => setWorksheetPresentation({ operandFont: event.target.value })}>
+          <option value="mono">Terminal Mono</option>
+          <option value="courier">Courier</option>
+          <option value="console">Lucida Console</option>
+          <option value="serif">Book Serif</option>
+          <option value="sans">Clean Sans</option>
+        </select>
+      </label>
+      <div className="input-row">
+        <label>Problems<select value={count} onChange={event => setCount(Number(event.target.value))}>{[6,8,12,16,20,24,30].map(n => <option key={n} value={n}>{n} problems</option>)}</select></label>
+        <label>Grade level<select value={worksheetTemplate.grade} onChange={event => setWorksheetPresentation({ grade: event.target.value })}>{[1,2,3,4,5,6,7,8].map(n => <option key={n}>Grade {n}</option>)}</select></label>
+      </div>
+      <label>Keywords<input value={worksheetTemplate.tags} onChange={event => setWorksheetPresentation({ tags: event.target.value })}/></label>
+      <button className="secondary full" onClick={regenerateWorksheet}><Icon name="refresh" size={17}/>Generate fresh problems</button>
+      <div className="toggle-row">
+        <div><strong>Answer key</strong><small>Include solutions on the sheet</small></div>
+        <button role="switch" aria-checked={answers} aria-label="Show answer key" className={`toggle ${answers ? 'on' : ''}`} onClick={() => setAnswers(!answers)}><span/></button>
+      </div>
+      <div className="instruction"><span>✦</span><p>Click a number to edit it. Use its refresh arrow to reroll just that operand.</p></div>
+      <button className="primary full" onClick={() => window.print()}><Icon name="print" size={17}/>Print / Save as PDF</button>
+      <button className="text-button full" onClick={() => navigate('Design a Problem')}>Open problem editor <Icon name="arrow" size={16}/></button>
     </section>
     <section className="preview-panel worksheet-stage">
-      <div className="preview-toolbar"><span><i/>LIVE PREVIEW</span><span>{problems.length} problems · Letter 8.5 × 11 in</span></div><div className={`worksheet operand-font-${design.operandFont || 'mono'}`} style={{'--problem-font': `${worksheetFontSize}px`, '--problem-rows': worksheetRows, '--problem-columns': worksheetColumns}}><div className="worksheet-brand">MATHFOUNDRY <span>{design.grade} · PRACTICE SERIES</span></div><h2>{title || 'Untitled worksheet'}</h2><p className="worksheet-instruction">{answers ? 'Answer key • Solutions shown below' : 'Take your time. Show your thinking. You’ve got this.'}</p><div className="student-line">Name <span/> Date <span/></div><div className={`worksheet-problems ${worksheetColumns > 2 ? 'three-columns' : ''}`}>{problems.map(renderWorksheetProblem)}</div><div className="worksheet-footer"><span>Small steps. Big discoveries.</span><span>MathFoundry · 1</span></div></div><div className="preview-caption"><Icon name="check" size={15}/>Worksheet problems are generated from your reusable problem design.</div>
+      <div className="preview-toolbar"><span><i/>LIVE PREVIEW</span><span>{problems.length} problems · Letter 8.5 × 11 in</span></div><div className={`worksheet operand-font-${worksheetTemplate.operandFont || 'mono'}`} style={{'--problem-font': `${worksheetFontSize}px`, '--problem-rows': worksheetRows, '--problem-columns': worksheetColumns}}><div className="worksheet-brand">MATHFOUNDRY <span>{worksheetTemplate.grade} · PRACTICE SERIES</span></div><h2>{title || 'Untitled worksheet'}</h2><p className="worksheet-instruction">{answers ? 'Answer key • Solutions shown below' : 'Take your time. Show your thinking. You’ve got this.'}</p><div className="student-line">Name <span/> Date <span/></div><div className={`worksheet-problems ${worksheetColumns > 2 ? 'three-columns' : ''}`}>{problems.map(renderWorksheetProblem)}</div><div className="worksheet-footer"><span>Small steps. Big discoveries.</span><span>MathFoundry · 1</span></div></div><div className="preview-caption"><Icon name="check" size={15}/>Worksheet problems are generated from your reusable problem design.</div>
     </section>
   </>
 }

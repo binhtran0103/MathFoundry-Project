@@ -4,7 +4,7 @@ import { symbols } from '../models/worksheet.js'
 
 // Renders the problem canvas, palette, and selected object settings.
 export default function ProblemEditorView({ controller }) {
-  const { design, title, setTitle, selectedObject, dragPreview, canvasRef, canvasItems, setExpression,
+  const { design, designTitle, setDesignTitle, selectedObject, dragPreview, canvasRef, canvasItems, setExpression,
     addOperand, addOperator, selectCanvasItem, renameOperand, updateOperandSettings, beginCanvasDrag,
     beginPaletteDrag, updateSelectedObject, resizeAnswerObject, removeCanvasItem } = controller
 
@@ -99,7 +99,7 @@ export default function ProblemEditorView({ controller }) {
   return <>
     <section className="settings-panel">
       <div className="panel-heading"><Icon name="pen"/><h2>Problem designer</h2></div>
-      <label>Worksheet title<input value={title} maxLength={80} onChange={e => setTitle(e.target.value)}/></label>
+      <label>Problem design title<input value={designTitle} maxLength={80} onChange={e => setDesignTitle(e.target.value)}/></label>
       <div className="selected-object-card"><div className="builder-section-label">SELECTED OBJECT</div>{renderSelectedObjectSettings()}{selectedObject && <button className="text-button" onClick={() => removeCanvasItem(selectedObject)}>Remove selected object</button>}</div>
     </section>
     <section className="preview-panel editor-stage">
